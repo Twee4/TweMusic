@@ -1,4 +1,4 @@
-use egui::Color32;
+use eframe::egui::Color32;
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub enum Screen {
@@ -26,4 +26,3 @@ impl Song {
         }
     }
 }
-

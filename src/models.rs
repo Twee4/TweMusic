@@ -1,7 +1,7 @@
 use eframe::{App, Frame, NativeOptions};
-use egui::{
-    vec2, Align, Button, CentralPanel, Color32, Context, FontId, Layout, Margin, RichText,
-    ScrollArea, SidePanel, TopBottomPanel,
+use eframe::egui::{
+    self, Align, Button, CentralPanel, Color32, Context, Layout, Margin, RichText, ScrollArea,
+    SidePanel, TopBottomPanel,
 };
 
 mod models;
@@ -16,8 +16,8 @@ struct TweMusicApp {
     songs: Vec<Song>,
 }
 
-impl Default for TweMusicApp {
-    fn default() -> Self {
+impl TweMusicApp {
+    fn new() -> Self {
         Self {
             screen: Screen::Home,
             search_query: String::new(),
@@ -31,14 +31,14 @@ impl Default for TweMusicApp {
             ],
         }
     }
-}
 
-impl TweMusicApp {
     fn nav_button(&mut self, ui: &mut egui::Ui, label: &str, target: Screen) {
         let active = self.screen == target;
 
-        let button = Button::new(RichText::new(label).size(15.0)).min_size(vec2(160.0, 38.0));
-        let response = ui.add_sized([160.0, 38.0], button.fill(if active { COLORS.primary } else { Color32::TRANSPARENT }));
+        let response = ui.add_sized(
+            [160.0, 38.0],
+            Button::new(RichText::new(label).size(15.0)).fill(if active { COLORS.primary } else { Color32::TRANSPARENT }),
+        );
 
         if response.clicked() {
             self.screen = target;
@@ -47,7 +47,6 @@ impl TweMusicApp {
 
     fn render_topbar(&mut self, ui: &mut egui::Ui) {
         ui.horizontal(|ui| {
-            ui.spacing_mut().item_spacing.x = 10.0;
             ui.heading("TweMusic");
             ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                 if ui
@@ -65,7 +64,7 @@ impl TweMusicApp {
 
     fn render_nav(&mut self, ui: &mut egui::Ui) {
         ui.vertical(|ui| {
-            ui.add_space(14.0);
+            ui.add_space(12.0);
             self.nav_button(ui, "Home", Screen::Home);
             self.nav_button(ui, "Search", Screen::Search);
             self.nav_button(ui, "Library", Screen::Library);
@@ -82,7 +81,7 @@ impl TweMusicApp {
             .min_col_width(220.0)
             .show(ui, |ui| {
                 for song in &self.songs {
-                    let inner = ui.allocate_ui(vec2(220.0, 120.0), |ui| {
+                    let response = ui.allocate_ui(vec2(220.0, 120.0), |ui| {
                         ui.vertical(|ui| {
                             ui.allocate_ui(vec2(220.0, 80.0), |ui| {
                                 ui.painter().rect_filled(ui.max_rect().shrink(4.0), 16.0, song.cover);
@@ -92,7 +91,7 @@ impl TweMusicApp {
                             ui.label(RichText::new(song.artist.clone()).size(12.0).color(Color32::from_rgb(186, 190, 200)));
                         });
                     });
-                    if inner.response.clicked() {
+                    if response.response.clicked() {
                         // placeholder for future playback selection
                     }
                     ui.end_row();
@@ -222,6 +221,5 @@ fn main() -> eframe::Result<()> {
         ..Default::default()
     };
 
-    eframe::run_native("TweMusic", native_options, Box::new(|_cc| Ok(Box::new(TweMusicApp::default()))))
+    eframe::run_native("TweMusic", native_options, Box::new(|_cc| Ok(Box::new(TweMusicApp::new()))))
 }
-
