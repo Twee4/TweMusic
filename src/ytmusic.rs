@@ -63,6 +63,14 @@ pub fn search_tracks(query: &str) -> Result<Vec<Track>, SearchError> {
     Ok(tracks)
 }
 
+/// Build the official YouTube Music watch URL for a parsed video ID.
+/// Only standard 11-character YouTube IDs are accepted.
+pub fn youtube_music_url(video_id: &str) -> Option<String> {
+    let valid = video_id.len() == 11
+        && video_id.bytes().all(|byte| byte.is_ascii_alphanumeric() || byte == b'_' || byte == b'-');
+    valid.then(|| format!("https://music.youtube.com/watch?v={video_id}"))
+}
+
 fn collect_video_renderers(value: &Value, tracks: &mut Vec<Track>, seen: &mut HashSet<String>) {
     match value {
         Value::Object(object) => {
@@ -105,6 +113,7 @@ fn parse_video_renderer(renderer: &Value, seen: &mut HashSet<String>) -> Option<
         artist,
         album: None,
         duration,
+        video_id: Some(video_id.to_owned()),
     })
 }
 
@@ -144,7 +153,7 @@ mod tests {
     #[test]
     fn extracts_renderer_metadata_and_deduplicates_ids() {
         let renderer = json!({
-            "videoId": "abc123",
+            "videoId": "abc123_XYZ0",
             "title": { "runs": [{ "text": "Example Song" }] },
             "longBylineText": { "simpleText": "Example Artist" },
             "lengthText": { "simpleText": "3:42" }
@@ -154,6 +163,13 @@ mod tests {
         assert_eq!(track.title, "Example Song");
         assert_eq!(track.artist, "Example Artist");
         assert_eq!(track.duration.as_secs(), 222);
+        assert_eq!(track.video_id.as_deref(), Some("abc123_XYZ0"));
         assert!(parse_video_renderer(&renderer, &mut seen).is_none());
+    }
+
+    #[test]
+    fn youtube_music_url_rejects_malformed_ids() {
+        assert_eq!(youtube_music_url("abc123_XYZ0"), Some("https://music.youtube.com/watch?v=abc123_XYZ0".to_owned()));
+        assert!(youtube_music_url("not a video id").is_none());
     }
 }

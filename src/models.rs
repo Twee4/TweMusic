@@ -18,6 +18,8 @@ pub struct Track {
     pub artist: String,
     pub album: Option<String>,
     pub duration: Duration,
+    /// Present for remote YouTube Music search results; demo/local tracks have none.
+    pub video_id: Option<String>,
 }
 
 impl Track {
@@ -28,6 +30,7 @@ impl Track {
             artist: artist.to_owned(),
             album: album.map(str::to_owned),
             duration: Duration::from_secs(seconds),
+            video_id: None,
         }
     }
 

@@ -1,28 +1,14 @@
 # TweMusic
 
-TweMusic is a Linux-first desktop music client prototype written in Rust, with a Material 3-inspired interface.
+TweMusic is a Linux-first music client prototype written in Rust.
 
-## Stages
+## Current functionality
 
-1. Desktop shell and design system
-2. App state, navigation, typed track models, local search, and queue controls
-3. YouTube Music metadata search
-4. MPV local-file playback
-5. YouTube Music playback, MPRIS integration, packaging, and polish
+- Search YouTube Music for public metadata (unofficial endpoint; may change).
+- Open a result in the official YouTube Music website using the system browser.
+- Play local audio files with MPV.
 
-## Current stage: Stage 4
-
-TweMusic can play a local audio file through MPV. In **Settings**, enter the path to an audio file and choose **Play file**; the bottom player has a play/pause control. MPV is started on demand and controlled over its local Unix-domain JSON IPC socket.
-
-Install MPV first, for example:
-
-```bash
-sudo apt install mpv  # Debian/Ubuntu
-sudo dnf install mpv  # Fedora
-sudo pacman -S mpv    # Arch Linux
-```
-
-YouTube Music search results are still metadata-only and cannot be played by this stage. No audio is downloaded or extracted from search results. The MPRIS desktop integration and YouTube Music playback remain future work; the current stage does not claim media-key support.
+YouTube search results are **not played or downloaded by TweMusic**. Listening to a result opens `music.youtube.com`, where playback and account access are handled by YouTube. This keeps stream handling with the service's official player.
 
 ## Run and test
 
@@ -31,4 +17,20 @@ cargo run
 cargo test
 ```
 
-Search requires an internet connection and relies on an undocumented endpoint that may change. Local playback requires MPV. The project is a prototype; use services in accordance with their terms and applicable law.
+Install MPV for local file playback:
+
+```bash
+sudo apt install mpv  # Debian/Ubuntu
+sudo dnf install mpv  # Fedora
+sudo pacman -S mpv    # Arch Linux
+```
+
+Search requires an internet connection. It uses an undocumented YouTube Music metadata endpoint and may need maintenance if the service changes. Use YouTube Music in accordance with its terms and applicable law.
+
+## Development stages
+
+1. Desktop shell and design system
+2. Typed app state, search and queue models
+3. YouTube Music metadata search
+4. MPV local-file playback
+5. Reliable official integration, Linux media controls, persistence, packaging, and UI polish

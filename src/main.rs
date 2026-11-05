@@ -1,7 +1,7 @@
 use std::{fs, path::PathBuf, sync::mpsc::{self, Receiver, TryRecvError}, thread};
 
 use eframe::egui::{self, Align, Button, CentralPanel, Color32, Context, Layout, Margin, RichText, ScrollArea, SidePanel, TopBottomPanel};
-use twe_music::{models::{Screen, Track}, mpv::MpvPlayer, state::{AppState, PlaybackStatus}, theme};
+use twe_music::{models::{Screen, Track}, mpv::MpvPlayer, state::{AppState, PlaybackStatus}, theme, ytmusic};
 
 struct TweMusicApp {
     state: AppState,
@@ -29,7 +29,7 @@ impl TweMusicApp {
         self.state.search_message = Some("Searching YouTube Music…".to_owned());
         let repaint = ctx.clone();
         thread::spawn(move || {
-            let result = twe_music::ytmusic::search_tracks(&query).map_err(|error| error.to_string());
+            let result = ytmusic::search_tracks(&query).map_err(|error| error.to_string());
             let _ = tx.send(result);
             repaint.request_repaint();
         });
@@ -114,6 +114,8 @@ impl TweMusicApp {
     }
 
     fn track_row(&mut self, ui: &mut egui::Ui, track: &Track, index: usize) {
+        let video_id = track.video_id.clone();
+        let mut open_error = None;
         ui.horizontal(|ui| {
             let color = theme::COVER_COLORS[index % theme::COVER_COLORS.len()];
             let (rect, _) = ui.allocate_exact_size(egui::vec2(44.0, 44.0), egui::Sense::hover());
@@ -124,10 +126,22 @@ impl TweMusicApp {
                 ui.label(RichText::new(&track.artist).color(theme::ON_SURFACE_VARIANT));
             });
             ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                if ui.button("Queue").clicked() { self.state.play_track(track.id); }
+                if let Some(video_id) = &video_id {
+                    if ui.button("Open in YouTube Music").clicked() {
+                        match ytmusic::youtube_music_url(video_id) {
+                            Some(url) => if let Err(error) = webbrowser::open(&url) {
+                                open_error = Some(format!("Could not open YouTube Music: {error}"));
+                            },
+                            None => open_error = Some("YouTube returned an invalid video ID.".to_owned()),
+                        }
+                    }
+                } else if ui.button("Queue demo track").clicked() {
+                    self.state.play_track(track.id);
+                }
                 ui.label(track.duration_label());
             });
         });
+        if let Some(error) = open_error { self.player_message = Some(error); }
         ui.add_space(8.0);
     }
 
@@ -194,7 +208,8 @@ impl TweMusicApp {
             ui.set_min_width(420.0);
             ui.label(RichText::new("YouTube Music").strong());
             ui.add_space(8.0);
-            ui.label("Search returns public metadata only. Search results are not playable yet.");
+            ui.label("Search returns public metadata. Open a result to listen on music.youtube.com.");
+            ui.label("The app does not extract or download YouTube audio streams.");
         });
     }
 
@@ -223,7 +238,7 @@ impl eframe::App for TweMusicApp {
             ui.horizontal(|ui| {
                 ui.heading("TweMusic");
                 ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                    ui.label(RichText::new("Stage 4 · MPV local playback").color(theme::ON_SURFACE_VARIANT));
+                    ui.label(RichText::new("Search and browser playback").color(theme::ON_SURFACE_VARIANT));
                 });
             });
         });
