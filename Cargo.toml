@@ -1,0 +1,17 @@
+[package]
+name = "twe_music"
+version = "0.1.0"
+edition = "2021"
+description = "A native Linux YouTube Music client built in Rust with a Material 3-inspired interface"
+license = "MIT"
+
+[dependencies]
+eframe = "0.29"
+
+[profile.dev]
+opt-level = 0
+
+[profile.release]
+lto = true
+codegen-units = 1
+panic = "abort"
