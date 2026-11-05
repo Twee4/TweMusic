@@ -1,297 +1,43 @@
-use eframe::{egui, App, Frame, NativeOptions};
-use egui::{
-    vec2, Align, Align2, CentralPanel, Color32, FontId, Layout, Margin, Rgba, RichText, ScrollArea,
-    SidePanel, TopBottomPanel, Button, Vec2, Window,
-};
+# TweMusic
 
-#[derive(Clone, Copy, PartialEq, Eq)]
-enum Tab {
-    Home,
-    Search,
-    Library,
-    Settings,
-}
+TweMusic is a native Linux YouTube Music client built from scratch in Rust with a Material 3-inspired interface.
 
-#[derive(Clone)]
-struct Song {
-    title: &'static str,
-    artist: &'static str,
-    duration: &'static str,
-    accent: Color32,
-}
+## Stage plan
 
-struct TweMusicApp {
-    current_tab: Tab,
-    search_query: String,
-    songs: Vec<Song>,
-}
+### Stage 1: desktop shell and design system
+- Rust desktop window
+- Material 3-inspired dark theme
+- layout shell: top bar, navigation, content area, player bar
+- placeholder media cards and search flow
 
-impl TweMusicApp {
-    fn new() -> Self {
-        Self {
-            current_tab: Tab::Home,
-            search_query: String::new(),
-            songs: vec![
-                Song {
-                    title: "Midnight Echo",
-                    artist: "Nova Lane",
-                    duration: "3:42",
-                    accent: Color32::from_rgb(128, 90, 213),
-                },
-                Song {
-                    title: "Electric Bloom",
-                    artist: "Iris City",
-                    duration: "4:15",
-                    accent: Color32::from_rgb(255, 120, 75),
-                },
-                Song {
-                    title: "Silver Skyline",
-                    artist: "Red Harbor",
-                    duration: "2:58",
-                    accent: Color32::from_rgb(53, 182, 145),
-                },
-                Song {
-                    title: "Night Shift",
-                    artist: "Luna Kestrel",
-                    duration: "5:07",
-                    accent: Color32::from_rgb(77, 141, 255),
-                },
-            ],
-        }
-    }
+### Stage 2: app state and models
+- typed screens and track models
+- state transitions between home/search/library/settings
+- prepare for real API and playback integrations
 
-    fn sidebar_button(&self, ui: &mut egui::Ui, label: &str, tab: Tab) -> egui::Response {
-        let active = self.current_tab == tab;
-        let mut btn = egui::Button::new(
-            RichText::new(label)
-                .font(FontId::proportional(15.0))
-                .color(if active { Color32::WHITE } else { Color32::from_rgb(195, 198, 208) }),
-        )
-        .fill(if active {
-            Color32::from_rgb(109, 89, 255)
-        } else {
-            Color32::TRANSPARENT
-        })
-        .min_size(vec2(150.0, 38.0))
-        .rounding(12.0);
+### Stage 3: YouTube Music client layer
+- auth handling and secure token storage
+- search, home, library, and song metadata requests
+- account and cookie-based sign-in flow
 
-        if !active {
-            btn = btn.stroke(egui::Stroke::new(1.0, Color32::from_rgba_unmultiplied(255, 255, 255, 18)));
-        }
+### Stage 4: Linux native integration
+- MPV playback
+- MPRIS / media keys integration
+- system tray and desktop controls
 
-        ui.add(btn)
-    }
+### Stage 5: polish and packaging
+- release builds
+- install and distro packaging
+- quality, UX, and performance improvements
 
-    fn render_top_bar(&mut self, ui: &mut egui::Ui) {
-        ui.horizontal(|ui| {
-            ui.add_space(8.0);
-            ui.heading("TweMusic");
-            ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                if ui
-                    .add(Button::new(RichText::new("Sign in").strong()).fill(Color32::from_rgb(119, 92, 255)).min_size(vec2(104.0, 38.0)).rounding(18.0))
-                    .clicked()
-                {
-                    self.current_tab = Tab::Settings;
-                }
-            });
-        });
-    }
+## Run
 
-    fn render_nav(&mut self, ui: &mut egui::Ui) {
-        ui.vertical_centered_justified(|ui| {
-            ui.add_space(10.0);
-            let tabs = [
-                ("Home", Tab::Home),
-                ("Search", Tab::Search),
-                ("Library", Tab::Library),
-                ("Settings", Tab::Settings),
-            ];
+```bash
+cargo run
+```
 
-            for (label, tab) in tabs {
-                if self.sidebar_button(ui, label, tab).clicked() {
-                    self.current_tab = tab;
-                }
-            }
-        });
-    }
+## Tech stack
 
-    fn render_home(&mut self, ui: &mut egui::Ui) {
-        ui.heading("Good evening");
-        ui.add_space(14.0);
-
-        egui::Grid::new("home_cards")
-            .spacing((16.0, 16.0))
-            .min_col_width(220.0)
-            .show(ui, |ui| {
-                for song in &self.songs {
-                    ui.allocate_ui(vec2(220.0, 112.0), |ui| {
-                        ui.vertical(|ui| {
-                            ui.allocate_ui(vec2(220.0, 72.0), |ui| {
-                                ui.painter().rect_filled(
-                                    ui.max_rect().shrink(6.0),
-                                    18.0,
-                                    song.accent,
-                                );
-                            });
-                            ui.add_space(8.0);
-                            ui.label(RichText::new(song.title).font(FontId::proportional(18.0)).strong());
-                            ui.label(RichText::new(song.artist).font(FontId::proportional(12.0)).color(Color32::from_rgb(170, 176, 190)));
-                        });
-                    });
-                    ui.end_row();
-                }
-            });
-    }
-
-    fn render_search(&mut self, ui: &mut egui::Ui) {
-        ui.heading("Search");
-        ui.add_space(12.0);
-        ui.horizontal(|ui| {
-            ui.add_sized(
-                [ui.available_width(), 46.0],
-                egui::TextEdit::singleline(&mut self.search_query).hint_text("Search songs, artists, albums"),
-            );
-        });
-
-        ui.add_space(18.0);
-
-        if self.search_query.trim().is_empty() {
-            ui.label(RichText::new("Trending now").color(Color32::from_rgb(200, 204, 214)));
-            ui.add_space(10.0);
-            egui::Grid::new("search_results")
-                .spacing((14.0, 14.0))
-                .show(ui, |ui| {
-                    for song in &self.songs {
-                        ui.horizontal(|ui| {
-                            ui.allocate_ui(vec2(240.0, 42.0), |ui| {
-                                ui.label(RichText::new(song.title).strong());
-                            });
-                            ui.label(RichText::new(song.artist).color(Color32::from_rgb(160, 167, 182)));
-                            ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                                ui.label(song.duration);
-                            });
-                        });
-                        ui.end_row();
-                    }
-                });
-        } else {
-            ui.label(RichText::new(format!("Results for: \"{}\"", self.search_query)).color(Color32::from_rgb(200, 204, 214)));
-        }
-    }
-
-    fn render_library(&mut self, ui: &mut egui::Ui) {
-        ui.heading("Your library");
-        ui.add_space(12.0);
-
-        ScrollArea::vertical().show(ui, |ui| {
-            for song in &self.songs {
-                ui.horizontal_wrapped(|ui| {
-                    ui.allocate_ui(vec2(52.0, 52.0), |ui| {
-                        ui.painter().rect_filled(ui.max_rect().shrink(4.0), 14.0, song.accent);
-                    });
-                    ui.vertical(|ui| {
-                        ui.label(RichText::new(song.title).strong());
-                        ui.label(RichText::new(song.artist).color(Color32::from_rgb(170, 176, 190)));
-                    });
-                    ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                        ui.label(song.duration);
-                    });
-                    ui.add_space(8.0);
-                });
-                ui.add_space(12.0);
-            }
-        });
-    }
-
-    fn render_settings(&mut self, ui: &mut egui::Ui) {
-        ui.heading("Settings");
-        ui.add_space(16.0);
-
-        ui.group(|ui| {
-            ui.vertical(|ui| {
-                ui.label(RichText::new("Appearance").strong());
-                ui.add_space(8.0);
-                ui.checkbox(&mut true, "Dark mode");
-                ui.checkbox(&mut true, "Material 3 accent colors");
-            });
-        });
-
-        ui.add_space(16.0);
-
-        ui.group(|ui| {
-            ui.vertical(|ui| {
-                ui.label(RichText::new("Account").strong());
-                ui.add_space(8.0);
-                ui.label("YouTube Music cookie authentication will be added next.");
-                ui.label("Storage: ~/.config/TweMusic");
-            });
-        });
-    }
-}
-
-impl App for TweMusicApp {
-    fn update(&mut self, ctx: &egui::Context, _frame: &mut Frame) {
-        let mut visuals = egui::Visuals::dark();
-        visuals.window_fill = Color32::from_rgb(17, 19, 24);
-        visuals.panel_fill = Color32::from_rgb(24, 26, 32);
-        visuals.extreme_bg_color = Color32::from_rgb(15, 17, 22);
-        visuals.widgets.noninteractive.bg_fill = Color32::from_rgb(30, 32, 38);
-        visuals.widgets.inactive.bg_fill = Color32::from_rgb(31, 34, 42);
-        visuals.widgets.hovered.bg_fill = Color32::from_rgb(40, 43, 52);
-        visuals.widgets.active.bg_fill = Color32::from_rgb(118, 94, 255);
-        visuals.selection.stroke.color = Color32::from_rgb(157, 136, 255);
-        ctx.set_visuals(visuals);
-
-        TopBottomPanel::top("top_panel")
-            .frame(egui::Frame::none().inner_margin(Margin::same(12.0)))
-            .show(ctx, |ui| self.render_top_bar(ui));
-
-        SidePanel::left("nav_panel")
-            .default_width(180.0)
-            .resizable(false)
-            .frame(egui::Frame::none().inner_margin(Margin::same(12.0)))
-            .show(ctx, |ui| self.render_nav(ui));
-
-        CentralPanel::default().show(ctx, |ui| match self.current_tab {
-            Tab::Home => self.render_home(ui),
-            Tab::Search => self.render_search(ui),
-            Tab::Library => self.render_library(ui),
-            Tab::Settings => self.render_settings(ui),
-        });
-
-        TopBottomPanel::bottom("bottom_player")
-            .exact_height(84.0)
-            .show(ctx, |ui| {
-                ui.allocate_ui(vec2(ui.available_width(), 84.0), |ui| {
-                    ui.horizontal(|ui| {
-                        ui.allocate_ui(vec2(58.0, 58.0), |ui| {
-                            ui.painter().rect_filled(ui.max_rect().shrink(4.0), 18.0, Color32::from_rgb(128, 90, 213));
-                        });
-                        ui.vertical(|ui| {
-                            ui.label(RichText::new("Midnight Echo").strong());
-                            ui.label(RichText::new("Nova Lane").color(Color32::from_rgb(190, 196, 210)));
-                        });
-                        ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                            ui.horizontal(|ui| {
-                                ui.add(Button::new("⏮").min_size(vec2(38.0, 38.0)).rounding(18.0));
-                                ui.add(Button::new("⏸").min_size(vec2(42.0, 42.0)).rounding(20.0).fill(Color32::from_rgb(119, 92, 255)));
-                                ui.add(Button::new("⏭").min_size(vec2(38.0, 38.0)).rounding(18.0));
-                            });
-                        });
-                    });
-                });
-            });
-    }
-}
-
-fn main() -> eframe::Result<()> {
-    let native_options = NativeOptions {
-        viewport: egui::ViewportBuilder::default()
-            .with_inner_size([1280.0, 820.0])
-            .with_title("TweMusic"),
-        ..Default::default()
-    };
-
-    eframe::run_native("TweMusic", native_options, Box::new(|_cc| Ok(Box::new(TweMusicApp::new()))))
-}
-
+- Rust
+- `eframe` / `egui` for the desktop UI
+- Linux native integration planned: D-Bus, MPRIS, media keys, tray

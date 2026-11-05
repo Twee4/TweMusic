@@ -1,23 +1,30 @@
-# TweMusic
+use egui::{Color32, Visuals};
 
-TweMusic is a fresh Rust desktop app for Linux focused on a YouTube Music-inspired experience with a Material 3-inspired interface.
+pub struct Colors;
 
-## Goals
+impl Colors {
+    pub const primary: Color32 = Color32::from_rgb(120, 94, 255);
+    pub const secondary: Color32 = Color32::from_rgb(255, 127, 80);
+    pub const tertiary: Color32 = Color32::from_rgb(87, 190, 143);
+    pub const accent: Color32 = Color32::from_rgb(46, 133, 255);
+    pub const success: Color32 = Color32::from_rgb(48, 169, 120);
+    pub const warn: Color32 = Color32::from_rgb(241, 171, 84);
+    pub const background: Color32 = Color32::from_rgb(18, 20, 26);
+    pub const panel: Color32 = Color32::from_rgb(27, 29, 36);
+    pub const panel_alt: Color32 = Color32::from_rgb(38, 40, 50);
+}
 
-- Linux-first desktop app shell
-- Material 3-inspired design system
-- Search, home, library, and settings screens
-- Audio playback integration with MPV / MPRIS in later milestones
-- Secure token storage and YouTube Music API integration
+pub fn dark_visuals() -> Visuals {
+    let mut v = Visuals::dark();
+    v.panel_fill = Colors.panel;
+    v.window_fill = Colors.background;
+    v.extreme_bg_color = Color32::from_rgb(12, 14, 18);
+    v.widgets.noninteractive.bg_fill = Colors.panel_alt;
+    v.widgets.noninteractive.fg_stroke.color = Color32::from_rgb(214, 218, 230);
+    v.widgets.inactive.bg_fill = Colors.panel_alt;
+    v.widgets.hovered.bg_fill = Color32::from_rgb(44, 47, 58);
+    v.widgets.active.bg_fill = Colors.primary;
+    v.selection.stroke.color = Colors.primary;
+    v
+}
 
-## Run
-
-```bash
-cargo run
-```
-
-## Tech stack
-
-- Rust
-- `eframe` + `egui` for the desktop UI
-- Linux native integration planned: D-Bus, MPRIS, tray, media keys
