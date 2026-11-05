@@ -1,18 +1,18 @@
 # TweMusic
 
-TweMusic is a native Linux YouTube Music client built from scratch in Rust with a Material 3-inspired interface.
+TweMusic is a Linux-first desktop music client prototype written in Rust, with a Material 3-inspired interface.
 
-## Current stage
+## Stages
 
-This repository contains the initial desktop app shell for a Linux-first YouTube Music client.
+1. Desktop shell and design system
+2. App state, navigation, typed track models, search over a demo catalog, and queue controls
+3. YouTube Music service client and account flow
+4. Playback engine and Linux MPRIS/media-key integration
+5. Packaging and polish
 
-## Stage plan
+## Current stage: Stage 2
 
-1. Desktop shell and Material 3-inspired design system
-2. App state, navigation, and typed models
-3. YouTube Music API client and auth flow
-4. MPV playback and MPRIS/Linux integration
-5. Packaging, polishing, and release builds
+The app has typed track IDs and metadata, application state for navigation/search/queue/playback, case-insensitive local catalog search, and player controls wired to the in-memory queue. The catalog is demo data: there is no YouTube Music connection or real audio playback yet.
 
 ## Run
 
@@ -20,8 +20,12 @@ This repository contains the initial desktop app shell for a Linux-first YouTube
 cargo run
 ```
 
-## Tech stack
+Run the state-model tests with:
 
-- Rust
-- `eframe` / `egui` for the desktop UI
-- Linux native integration planned: D-Bus, MPRIS, media keys, tray
+```bash
+cargo test
+```
+
+## Linux build prerequisites
+
+`eframe` uses native windowing and graphics libraries. On Debian/Ubuntu, install the system packages required by the selected backend before compiling if Cargo reports missing `pkg-config` libraries.
