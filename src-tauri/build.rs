@@ -38,7 +38,7 @@ fn transparent_rgba_png() -> Vec<u8> {
         0x78, 0x01, // zlib header
         0x01, 0x05, 0x00, 0xfa, 0xff, // final uncompressed DEFLATE block, 5 bytes
         0x00, 0x00, 0x00, 0x00, 0x00, // transparent pixel and filter byte
-        0x00, 0x06, 0x00, 0x01, // Adler-32 checksum
+        0x00, 0x05, 0x00, 0x01, // Adler-32 of the five zero bytes above
     ];
     append_png_chunk(&mut png, b"IDAT", &idat);
     append_png_chunk(&mut png, b"IEND", &[]);

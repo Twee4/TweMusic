@@ -71,8 +71,7 @@ impl MpvPlayer {
 
     /// Toggles pause and returns the new pause state.
     pub fn toggle_pause(&mut self) -> Result<bool, MpvError> {
-        let response = self.command(json!(["cycle", "pause"]))?;
-        let _ = response;
+        self.command(json!(["cycle", "pause"]))?;
         // Query the property after toggling so the UI reflects actual MPV state.
         let response = self.request(json!(["get_property", "pause"]))?;
         response.get("data").and_then(Value::as_bool)
