@@ -1,7 +1,12 @@
-use std::{fs, path::PathBuf, sync::mpsc::{self, Receiver, TryRecvError}, thread};
+use std::{fs, path::PathBuf, sync::mpsc::{self, Receiver, TryRecvError}, thread, time::{Duration, Instant}};
 
 use eframe::egui::{self, Align, Button, CentralPanel, Color32, Context, Layout, Margin, RichText, ScrollArea, SidePanel, TopBottomPanel};
-use twe_music::{models::{Screen, Track}, mpv::MpvPlayer, state::{AppState, PlaybackStatus}, theme, ytmusic};
+use twe_music::{models::{Screen, Track}, mpv::{self, MpvError, MpvPlayer}, state::{AppState, PlaybackStatus}, theme, ytmusic};
+
+fn format_seconds(seconds: f64) -> String {
+    let total = seconds.max(0.0) as u64;
+    format!("{}:{:02}", total / 60, total % 60)
+}
 
 struct TweMusicApp {
     state: AppState,
@@ -10,6 +15,12 @@ struct TweMusicApp {
     mpv: Option<MpvPlayer>,
     local_file_path: String,
     player_message: Option<String>,
+    ytdlp_available: Option<bool>,
+    last_poll: Instant,
+    position: Option<f64>,
+    duration: Option<f64>,
+    played_something: bool,
+    loading_since: Option<Instant>,
 }
 
 impl TweMusicApp {
@@ -17,6 +28,83 @@ impl TweMusicApp {
         Self {
             state: AppState::new(), search_rx: None, search_in_flight: false,
             mpv: None, local_file_path: String::new(), player_message: None,
+            ytdlp_available: None, last_poll: Instant::now(), position: None, duration: None,
+            played_something: false, loading_since: None,
+        }
+    }
+
+    fn ensure_player(&mut self) -> Result<&mut MpvPlayer, MpvError> {
+        if self.mpv.is_none() {
+            self.mpv = Some(MpvPlayer::start()?);
+        }
+        Ok(self.mpv.as_mut().expect("player was just started"))
+    }
+
+    /// Streams a YouTube Music track's audio through MPV (which resolves it with yt-dlp).
+    fn play_remote(&mut self, track: &Track) {
+        let Some(url) = track.video_id.as_deref().and_then(ytmusic::youtube_music_url) else {
+            self.player_message = Some("YouTube returned an invalid video ID.".to_owned());
+            return;
+        };
+        if !*self.ytdlp_available.get_or_insert_with(mpv::ytdlp_available) {
+            self.ytdlp_available = None; // check again next time, in case it was just installed
+            self.player_message = Some("yt-dlp is required to play YouTube tracks. Install it (for example `pipx install yt-dlp`) and try again.".to_owned());
+            return;
+        }
+        let result = self.ensure_player().and_then(|player| player.load_url(&url));
+        match result {
+            Ok(()) => {
+                self.state.play_track(track.id);
+                self.position = None;
+                self.duration = None;
+                self.played_something = false;
+                self.loading_since = Some(Instant::now());
+                self.player_message = Some(format!("Loading {}…", track.title));
+            }
+            Err(error) => self.player_message = Some(error.to_string()),
+        }
+    }
+
+    fn skip(&mut self, forward: bool) {
+        let Some(id) = self.state.adjacent_remote(forward) else { return; };
+        if let Some(track) = self.state.tracks.iter().find(|track| track.id == id).cloned() {
+            self.play_remote(&track);
+        }
+    }
+
+    /// Polls MPV for progress, detects the end of a track, and auto-advances the queue.
+    fn tick_player(&mut self, ctx: &Context) {
+        if self.state.playback != PlaybackStatus::Playing { return; }
+        let interval = Duration::from_millis(500);
+        ctx.request_repaint_after(interval);
+        if self.last_poll.elapsed() < interval { return; }
+        let Some(player) = self.mpv.as_mut() else { return; };
+        self.last_poll = Instant::now();
+        let position = player.position();
+        let duration = player.duration();
+        let idle = player.is_idle();
+
+        self.position = position;
+        self.duration = duration;
+        if position.is_some_and(|value| value > 0.0) {
+            if !self.played_something { self.player_message = None; }
+            self.played_something = true;
+            self.loading_since = None;
+        }
+        if !idle { return; }
+        if self.played_something {
+            self.played_something = false;
+            if self.state.adjacent_remote(true).is_some() {
+                self.skip(true);
+            } else {
+                self.state.playback = PlaybackStatus::Stopped;
+                self.position = None;
+                self.duration = None;
+            }
+        } else if self.loading_since.is_some_and(|since| since.elapsed() > Duration::from_secs(2)) {
+            self.loading_since = None;
+            self.state.playback = PlaybackStatus::Stopped;
+            self.player_message = Some("Could not play this track. Try updating yt-dlp (`yt-dlp -U`).".to_owned());
         }
     }
 
@@ -120,6 +208,7 @@ impl TweMusicApp {
     fn track_row(&mut self, ui: &mut egui::Ui, track: &Track, index: usize) {
         let video_id = track.video_id.clone();
         let mut open_error = None;
+        let mut play_requested = false;
         egui::Frame::group(ui.style())
             .fill(theme::SURFACE_CONTAINER)
             .inner_margin(Margin::same(10.0))
@@ -136,7 +225,8 @@ impl TweMusicApp {
                     });
                     ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                         if let Some(video_id) = &video_id {
-                            if ui.button("Open in YouTube Music").clicked() {
+                            if ui.button("Play").clicked() { play_requested = true; }
+                            if ui.button("Open on web").clicked() {
                                 match ytmusic::youtube_music_url(video_id) {
                                     Some(url) => if let Err(error) = webbrowser::open(&url) {
                                         open_error = Some(format!("Could not open YouTube Music: {error}"));
@@ -144,8 +234,8 @@ impl TweMusicApp {
                                     None => open_error = Some("YouTube returned an invalid video ID.".to_owned()),
                                 }
                             }
-                        } else if ui.button("Queue demo track").clicked() {
-                            self.state.play_track(track.id);
+                        } else {
+                            ui.add_enabled(false, Button::new("Demo track"));
                         }
                         ui.add_space(8.0);
                         ui.label(RichText::new(track.duration_label()).color(theme::ON_SURFACE_VARIANT));
@@ -153,6 +243,7 @@ impl TweMusicApp {
                 });
             });
         if let Some(error) = open_error { self.player_message = Some(error); }
+        if play_requested { self.play_remote(track); }
         ui.add_space(8.0);
     }
 
@@ -236,13 +327,26 @@ impl TweMusicApp {
         egui::Frame::group(ui.style()).fill(theme::SURFACE_CONTAINER).inner_margin(Margin::same(18.0)).show(ui, |ui| {
             ui.label(RichText::new("YouTube Music").strong().size(17.0));
             ui.add_space(4.0);
-            ui.label(RichText::new("Search returns public metadata. Open a result to listen on music.youtube.com.").color(theme::ON_SURFACE_VARIANT));
+            ui.label(RichText::new("Search returns public metadata. Play streams the audio only, through MPV and yt-dlp, so no video or ads load.").color(theme::ON_SURFACE_VARIANT));
             ui.add_space(4.0);
-            ui.label(RichText::new("TweMusic does not extract or download YouTube audio streams.").color(theme::ON_SURFACE_VARIANT));
+            ui.label(RichText::new("Requires mpv and yt-dlp. This may go against YouTube's terms of service, and yt-dlp needs regular updates.").color(theme::ON_SURFACE_VARIANT));
         });
     }
 
     fn render_player(&mut self, ctx: &Context) {
+        let (title, subtitle) = match self.state.current_track() {
+            Some(track) if self.mpv.is_some() => (track.title.clone(), track.artist.clone()),
+            _ if self.mpv.is_some() => ("Local audio player".to_owned(), "MPV".to_owned()),
+            _ => ("Nothing playing".to_owned(), "Ready for your next song".to_owned()),
+        };
+        let status = self.player_message.clone().unwrap_or(subtitle);
+        let progress = match (self.position, self.duration) {
+            (Some(position), Some(duration)) if duration > 0.0 => Some((position, duration)),
+            _ => None,
+        };
+        let can_prev = self.state.adjacent_remote(false).is_some();
+        let can_next = self.state.adjacent_remote(true).is_some();
+        let playing = self.state.playback == PlaybackStatus::Playing;
         TopBottomPanel::bottom("player-panel")
             .frame(egui::Frame::none().fill(theme::SURFACE_CONTAINER).inner_margin(Margin::same(12.0)))
             .show(ctx, |ui| {
@@ -252,12 +356,19 @@ impl TweMusicApp {
                     ui.painter().text(rect.center(), egui::Align2::CENTER_CENTER, "♪", egui::FontId::proportional(21.0), theme::ON_PRIMARY_CONTAINER);
                     ui.add_space(8.0);
                     ui.vertical(|ui| {
-                        ui.label(RichText::new(if self.mpv.is_some() { "Local audio player" } else { "Nothing playing" }).strong());
-                        ui.label(RichText::new(if self.state.playback == PlaybackStatus::Playing { "Playing · MPV local files" } else { "Ready for your next song" }).size(12.0).color(theme::ON_SURFACE_VARIANT));
+                        ui.label(RichText::new(title).strong());
+                        ui.label(RichText::new(status).size(12.0).color(theme::ON_SURFACE_VARIANT));
                     });
                     ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                        if ui.add_sized([120.0, 38.0], Button::new(if self.state.playback == PlaybackStatus::Playing { "Pause" } else { "Play" }).fill(theme::PRIMARY_CONTAINER)).clicked() {
+                        if ui.add_enabled(can_next, Button::new("Next")).clicked() { self.skip(true); }
+                        if ui.add_sized([100.0, 38.0], Button::new(if playing { "Pause" } else { "Play" }).fill(theme::PRIMARY_CONTAINER)).clicked() {
                             self.toggle_local_playback();
+                        }
+                        if ui.add_enabled(can_prev, Button::new("Prev")).clicked() { self.skip(false); }
+                        if let Some((position, duration)) = progress {
+                            ui.add_space(12.0);
+                            ui.label(format!("{} / {}", format_seconds(position), format_seconds(duration)));
+                            ui.add(egui::ProgressBar::new((position / duration).clamp(0.0, 1.0) as f32).desired_width(160.0));
                         }
                     });
                 });
@@ -268,6 +379,7 @@ impl TweMusicApp {
 impl eframe::App for TweMusicApp {
     fn update(&mut self, ctx: &Context, _frame: &mut eframe::Frame) {
         self.poll_search();
+        self.tick_player(ctx);
         ctx.set_visuals(theme::dark_visuals());
         TopBottomPanel::top("top-bar")
             .frame(egui::Frame::none().fill(theme::SURFACE).inner_margin(Margin::same(16.0)))

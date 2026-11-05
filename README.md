@@ -5,10 +5,11 @@ TweMusic is a Linux-first music client prototype written in Rust.
 ## Current functionality
 
 - Search YouTube Music for public metadata (unofficial endpoint; may change).
-- Open a result in the official YouTube Music website using the system browser.
+- Play a result: MPV streams the audio only (no video, no ads) using yt-dlp, with a queue, previous/next and auto-advance.
+- Open a result on the official YouTube Music website in your browser.
 - Play local audio files with MPV.
 
-YouTube search results are **not played or downloaded by TweMusic**. Listening to a result opens `music.youtube.com`, where playback and account access are handled by YouTube. This keeps stream handling with the service's official player.
+Playing a YouTube result hands its URL to MPV, which resolves the audio stream through `yt-dlp`. TweMusic itself does not download or store audio. This may go against YouTube's terms of service, and yt-dlp needs regular updates (`yt-dlp -U`) as YouTube changes. Use it at your own risk.
 
 ## Run and test
 
@@ -25,12 +26,12 @@ cargo run
 cargo test
 ```
 
-Install MPV for local file playback:
+Install MPV and yt-dlp (MPV plays local files on its own; YouTube tracks also need yt-dlp):
 
 ```bash
-sudo apt install mpv  # Debian/Ubuntu
-sudo dnf install mpv  # Fedora
-sudo pacman -S mpv    # Arch Linux
+sudo apt install mpv yt-dlp  # Debian/Ubuntu
+sudo dnf install mpv yt-dlp  # Fedora
+sudo pacman -S mpv yt-dlp    # Arch Linux
 ```
 
 Search requires an internet connection. It uses an undocumented YouTube Music metadata endpoint and may need maintenance if the service changes. Use YouTube Music in accordance with its terms and applicable law.

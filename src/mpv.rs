@@ -38,6 +38,18 @@ impl From<std::io::Error> for MpvError {
     fn from(error: std::io::Error) -> Self { Self::Io(error) }
 }
 
+/// Returns true when `yt-dlp` can be run; MPV needs it to play YouTube URLs.
+pub fn ytdlp_available() -> bool {
+    Command::new("yt-dlp")
+        .arg("--version")
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .status()
+        .map(|status| status.success())
+        .unwrap_or(false)
+}
+
 pub struct MpvPlayer {
     child: Child,
     socket_path: PathBuf,
@@ -49,7 +61,14 @@ impl MpvPlayer {
         let socket_path = std::env::temp_dir().join(format!("twe-music-mpv-{}.sock", std::process::id()));
         let _ = fs::remove_file(&socket_path);
         let child = Command::new("mpv")
-            .args(["--no-video", "--idle=yes", "--no-terminal", "--force-window=no"])
+            .args([
+                "--no-video",
+                "--idle=yes",
+                "--no-terminal",
+                "--force-window=no",
+                "--ytdl=yes",
+                "--ytdl-format=bestaudio/best",
+            ])
             .arg(format!("--input-ipc-server={}", socket_path.display()))
             .stdin(Stdio::null())
             .stdout(Stdio::null())
@@ -67,6 +86,38 @@ impl MpvPlayer {
         }
         self.command(json!(["loadfile", path.to_string_lossy(), "replace"]))?;
         Ok(())
+    }
+
+    /// Loads a YouTube Music watch URL; MPV resolves the audio stream through yt-dlp.
+    /// Only `https://music.youtube.com/watch?v=` URLs are accepted.
+    pub fn load_url(&mut self, url: &str) -> Result<(), MpvError> {
+        if !url.starts_with("https://music.youtube.com/watch?v=") {
+            return Err(MpvError::IpcUnavailable("refusing to load an unsupported URL".to_owned()));
+        }
+        self.command(json!(["loadfile", url, "replace"]))?;
+        Ok(())
+    }
+
+    /// Reads an MPV property. An unavailable property (nothing loaded yet) is `Value::Null`.
+    pub fn get_property(&mut self, name: &str) -> Result<Value, MpvError> {
+        match self.request(json!(["get_property", name])) {
+            Ok(response) => Ok(response.get("data").cloned().unwrap_or(Value::Null)),
+            Err(MpvError::InvalidResponse(message)) if message.contains("property unavailable") => Ok(Value::Null),
+            Err(error) => Err(error),
+        }
+    }
+
+    pub fn position(&mut self) -> Option<f64> {
+        self.get_property("time-pos").ok()?.as_f64()
+    }
+
+    pub fn duration(&mut self) -> Option<f64> {
+        self.get_property("duration").ok()?.as_f64()
+    }
+
+    /// True when MPV has nothing loaded (finished, failed, or never started a file).
+    pub fn is_idle(&mut self) -> bool {
+        self.get_property("idle-active").ok().and_then(|value| value.as_bool()).unwrap_or(false)
     }
 
     /// Toggles pause and returns the new pause state.

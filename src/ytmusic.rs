@@ -79,6 +79,11 @@ fn collect_video_renderers(value: &Value, tracks: &mut Vec<Track>, seen: &mut Ha
                     tracks.push(track);
                 }
             }
+            if let Some(renderer) = object.get("musicResponsiveListItemRenderer") {
+                if let Some(track) = parse_music_item(renderer, seen) {
+                    tracks.push(track);
+                }
+            }
             for child in object.values() {
                 collect_video_renderers(child, tracks, seen);
             }
@@ -112,6 +117,68 @@ fn parse_video_renderer(renderer: &Value, seen: &mut HashSet<String>) -> Option<
         title,
         artist,
         album: None,
+        duration,
+        video_id: Some(video_id.to_owned()),
+    })
+}
+
+/// Parses a YouTube Music search row (`musicResponsiveListItemRenderer`), the shape
+/// returned by the WEB_REMIX client: title in the first flex column, then
+/// "artist • album • duration" runs in the second.
+fn parse_music_item(renderer: &Value, seen: &mut HashSet<String>) -> Option<Track> {
+    let video_id = renderer
+        .pointer("/playlistItemData/videoId")
+        .and_then(Value::as_str)
+        .or_else(|| {
+            renderer
+                .pointer("/overlay/musicItemThumbnailOverlayRenderer/content/musicPlayButtonRenderer/playNavigationEndpoint/watchEndpoint/videoId")
+                .and_then(Value::as_str)
+        })?;
+    let title = renderer
+        .pointer("/flexColumns/0/musicResponsiveListItemFlexColumnRenderer/text")
+        .and_then(text_field)?;
+    let runs = renderer
+        .pointer("/flexColumns/1/musicResponsiveListItemFlexColumnRenderer/text/runs")
+        .and_then(Value::as_array)?;
+    if !seen.insert(video_id.to_owned()) {
+        return None;
+    }
+
+    let mut groups: Vec<String> = vec![String::new()];
+    for run in runs {
+        let text = run.get("text").and_then(Value::as_str).unwrap_or_default();
+        if text.trim() == "•" {
+            groups.push(String::new());
+        } else if let Some(group) = groups.last_mut() {
+            group.push_str(text);
+        }
+    }
+
+    let duration = match groups.last().and_then(|group| parse_duration(group.trim())) {
+        Some(duration) => {
+            groups.pop();
+            duration
+        }
+        None => Duration::default(),
+    };
+    if matches!(groups.first().map(|group| group.trim()), Some("Song" | "Video")) {
+        groups.remove(0);
+    }
+    let artist = groups
+        .first()
+        .map(|group| group.trim().to_owned())
+        .filter(|group| !group.is_empty())
+        .unwrap_or_else(|| "Unknown artist".to_owned());
+    let album = groups
+        .get(1)
+        .map(|group| group.trim().to_owned())
+        .filter(|group| !group.is_empty());
+
+    Some(Track {
+        id: crate::models::TrackId(stable_id(video_id)),
+        title,
+        artist,
+        album,
         duration,
         video_id: Some(video_id.to_owned()),
     })
@@ -165,6 +232,31 @@ mod tests {
         assert_eq!(track.duration.as_secs(), 222);
         assert_eq!(track.video_id.as_deref(), Some("abc123_XYZ0"));
         assert!(parse_video_renderer(&renderer, &mut seen).is_none());
+    }
+
+    #[test]
+    fn parses_music_search_rows() {
+        let row = json!({
+            "playlistItemData": { "videoId": "abc123_XYZ0" },
+            "flexColumns": [
+                { "musicResponsiveListItemFlexColumnRenderer": { "text": { "runs": [{ "text": "Example Song" }] } } },
+                { "musicResponsiveListItemFlexColumnRenderer": { "text": { "runs": [
+                    { "text": "Example Artist" }, { "text": " • " },
+                    { "text": "Example Album" }, { "text": " • " },
+                    { "text": "3:42" }
+                ] } } }
+            ]
+        });
+        let response = json!({ "contents": [{ "musicResponsiveListItemRenderer": row }] });
+        let mut tracks = Vec::new();
+        let mut seen = HashSet::new();
+        collect_video_renderers(&response, &mut tracks, &mut seen);
+        assert_eq!(tracks.len(), 1);
+        assert_eq!(tracks[0].title, "Example Song");
+        assert_eq!(tracks[0].artist, "Example Artist");
+        assert_eq!(tracks[0].album.as_deref(), Some("Example Album"));
+        assert_eq!(tracks[0].duration.as_secs(), 222);
+        assert_eq!(tracks[0].video_id.as_deref(), Some("abc123_XYZ0"));
     }
 
     #[test]
