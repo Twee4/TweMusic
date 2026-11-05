@@ -107,6 +107,12 @@ impl MpvPlayer {
         }
     }
 
+    /// Seeks to an absolute position in the current track, in seconds.
+    pub fn seek_to(&mut self, seconds: f64) -> Result<(), MpvError> {
+        self.command(json!(["seek", seconds.max(0.0), "absolute"]))?;
+        Ok(())
+    }
+
     pub fn position(&mut self) -> Option<f64> {
         self.get_property("time-pos").ok()?.as_f64()
     }

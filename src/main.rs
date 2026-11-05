@@ -1,7 +1,8 @@
 use std::{fs, path::PathBuf, sync::mpsc::{self, Receiver, TryRecvError}, thread, time::{Duration, Instant}};
 
 use eframe::egui::{self, Align, Button, CentralPanel, Color32, Context, Layout, Margin, RichText, ScrollArea, SidePanel, TopBottomPanel};
-use twe_music::{import, library::{self, Library, SavedTrack}, models::{Screen, Track}, mpv::{self, MpvError, MpvPlayer}, state::{AppState, PlaybackStatus}, theme, ytmusic};
+use souvlaki::{MediaControlEvent, MediaPosition};
+use twe_music::{import, library::{self, Library, SavedTrack}, media::Media, models::{Screen, Track, TrackId}, mpv::{self, MpvError, MpvPlayer}, state::{AppState, PlaybackStatus}, theme, ytmusic};
 
 type ImportResult = Result<(String, Vec<Track>), String>;
 
@@ -29,10 +30,16 @@ struct TweMusicApp {
     new_playlist_name: String,
     import_url: String,
     import_rx: Option<Receiver<ImportResult>>,
+    media: Option<Media>,
+    media_rx: Receiver<MediaControlEvent>,
+    media_synced: Option<(Option<TrackId>, PlaybackStatus)>,
+    seek_drag: Option<f64>,
 }
 
 impl TweMusicApp {
-    fn new() -> Self {
+    fn new(ctx: Context) -> Self {
+        let (media_tx, media_rx) = mpsc::channel();
+        let media = Media::new(media_tx, move || ctx.request_repaint());
         let library_path = library::default_path();
         let library = library_path.as_deref().map(Library::load_from).unwrap_or_else(Library::new);
         Self {
@@ -42,7 +49,44 @@ impl TweMusicApp {
             played_something: false, loading_since: None,
             library, library_path, selected_playlist: 0, new_playlist_name: String::new(),
             import_url: String::new(), import_rx: None,
+            media, media_rx, media_synced: None, seek_drag: None,
         }
+    }
+
+    fn seek_to(&mut self, seconds: f64) {
+        let Some(player) = self.mpv.as_mut() else { return; };
+        match player.seek_to(seconds) {
+            Ok(()) => self.position = Some(seconds),
+            Err(error) => self.player_message = Some(error.to_string()),
+        }
+    }
+
+    /// Handles commands from media keys and desktop media widgets.
+    fn poll_media(&mut self) {
+        while let Ok(event) = self.media_rx.try_recv() {
+            match event {
+                MediaControlEvent::Play => {
+                    if self.state.playback == PlaybackStatus::Paused { self.toggle_local_playback(); }
+                }
+                MediaControlEvent::Pause | MediaControlEvent::Stop => {
+                    if self.state.playback == PlaybackStatus::Playing { self.toggle_local_playback(); }
+                }
+                MediaControlEvent::Toggle => self.toggle_local_playback(),
+                MediaControlEvent::Next => self.skip(true),
+                MediaControlEvent::Previous => self.skip(false),
+                MediaControlEvent::SetPosition(MediaPosition(position)) => self.seek_to(position.as_secs_f64()),
+                _ => {}
+            }
+        }
+    }
+
+    /// Tells the desktop about the current track and state, only when they change.
+    fn sync_media(&mut self) {
+        let Some(media) = self.media.as_mut() else { return; };
+        let key = (self.state.current_track, self.state.playback);
+        if self.media_synced == Some(key) { return; }
+        self.media_synced = Some(key);
+        media.update(self.state.current_track(), self.state.playback, self.position);
     }
 
     fn save_library(&mut self) {
@@ -530,8 +574,15 @@ impl TweMusicApp {
                         if ui.add_enabled(can_prev, Button::new("Prev")).clicked() { self.skip(false); }
                         if let Some((position, duration)) = progress {
                             ui.add_space(12.0);
-                            ui.label(format!("{} / {}", format_seconds(position), format_seconds(duration)));
-                            ui.add(egui::ProgressBar::new((position / duration).clamp(0.0, 1.0) as f32).desired_width(160.0));
+                            let mut value = self.seek_drag.unwrap_or(position).clamp(0.0, duration);
+                            ui.label(format!("{} / {}", format_seconds(value), format_seconds(duration)));
+                            ui.spacing_mut().slider_width = 180.0;
+                            let response = ui.add(egui::Slider::new(&mut value, 0.0..=duration).show_value(false));
+                            if response.changed() { self.seek_drag = Some(value); }
+                            // Seek once the pointer is released (or right away for keyboard changes).
+                            if self.seek_drag.is_some() && !response.is_pointer_button_down_on() {
+                                if let Some(target) = self.seek_drag.take() { self.seek_to(target); }
+                            }
                         }
                     });
                 });
@@ -542,6 +593,7 @@ impl TweMusicApp {
 impl eframe::App for TweMusicApp {
     fn update(&mut self, ctx: &Context, _frame: &mut eframe::Frame) {
         self.poll_search();
+        self.poll_media();
         self.poll_import();
         self.tick_player(ctx);
         ctx.set_visuals(theme::dark_visuals());
@@ -585,6 +637,7 @@ impl eframe::App for TweMusicApp {
                 Screen::Settings => self.render_settings(ui),
             });
         self.render_player(ctx);
+        self.sync_media();
     }
 }
 
@@ -594,5 +647,5 @@ fn main() -> eframe::Result<()> {
             .with_min_inner_size([720.0, 520.0]).with_title("TweMusic"),
         ..Default::default()
     };
-    eframe::run_native("TweMusic", options, Box::new(|_cc| Ok(Box::new(TweMusicApp::new()))))
+    eframe::run_native("TweMusic", options, Box::new(|cc| Ok(Box::new(TweMusicApp::new(cc.egui_ctx.clone())))))
 }
