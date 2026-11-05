@@ -9,15 +9,6 @@
     "frontendDist": ""
   },
   "app": {
-    "windows": [
-      {
-        "title": "TweMusic",
-        "width": 1280,
-        "height": 820,
-        "resizable": true,
-        "fullscreen": false
-      }
-    ],
     "security": {
       "csp": null
     }
