@@ -1,7 +1,9 @@
 use std::{fs, path::PathBuf, sync::mpsc::{self, Receiver, TryRecvError}, thread, time::{Duration, Instant}};
 
 use eframe::egui::{self, Align, Button, CentralPanel, Color32, Context, Layout, Margin, RichText, ScrollArea, SidePanel, TopBottomPanel};
-use twe_music::{models::{Screen, Track}, mpv::{self, MpvError, MpvPlayer}, state::{AppState, PlaybackStatus}, theme, ytmusic};
+use twe_music::{import, library::{self, Library, SavedTrack}, models::{Screen, Track}, mpv::{self, MpvError, MpvPlayer}, state::{AppState, PlaybackStatus}, theme, ytmusic};
+
+type ImportResult = Result<(String, Vec<Track>), String>;
 
 fn format_seconds(seconds: f64) -> String {
     let total = seconds.max(0.0) as u64;
@@ -21,15 +23,84 @@ struct TweMusicApp {
     duration: Option<f64>,
     played_something: bool,
     loading_since: Option<Instant>,
+    library: Library,
+    library_path: Option<PathBuf>,
+    selected_playlist: usize,
+    new_playlist_name: String,
+    import_url: String,
+    import_rx: Option<Receiver<ImportResult>>,
 }
 
 impl TweMusicApp {
     fn new() -> Self {
+        let library_path = library::default_path();
+        let library = library_path.as_deref().map(Library::load_from).unwrap_or_else(Library::new);
         Self {
             state: AppState::new(), search_rx: None, search_in_flight: false,
             mpv: None, local_file_path: String::new(), player_message: None,
             ytdlp_available: None, last_poll: Instant::now(), position: None, duration: None,
             played_something: false, loading_since: None,
+            library, library_path, selected_playlist: 0, new_playlist_name: String::new(),
+            import_url: String::new(), import_rx: None,
+        }
+    }
+
+    fn save_library(&mut self) {
+        if let Some(path) = &self.library_path {
+            if let Err(error) = self.library.save_to(path) {
+                self.player_message = Some(format!("Could not save your library: {error}"));
+            }
+        }
+    }
+
+    fn start_import(&mut self, ctx: &Context) {
+        if self.import_rx.is_some() { return; }
+        let url = self.import_url.trim().to_owned();
+        if !import::is_supported_playlist_url(&url) {
+            self.player_message = Some("Paste a public playlist link from music.youtube.com or youtube.com (it must contain list=).".to_owned());
+            return;
+        }
+        let (tx, rx) = mpsc::channel();
+        self.import_rx = Some(rx);
+        self.player_message = Some("Importing playlist…".to_owned());
+        let repaint = ctx.clone();
+        thread::spawn(move || {
+            let _ = tx.send(import::import_playlist(&url));
+            repaint.request_repaint();
+        });
+    }
+
+    fn poll_import(&mut self) {
+        let Some(receiver) = &self.import_rx else { return; };
+        let outcome = match receiver.try_recv() {
+            Ok(result) => result,
+            Err(TryRecvError::Empty) => return,
+            Err(TryRecvError::Disconnected) => Err("Import stopped unexpectedly.".to_owned()),
+        };
+        self.import_rx = None;
+        match outcome {
+            Ok((name, tracks)) => {
+                let (index, added) = self.library.import(&name, &tracks);
+                self.selected_playlist = index;
+                self.import_url.clear();
+                self.save_library();
+                let saved_name = self.library.playlists[index].name.clone();
+                self.player_message = Some(format!("Imported {added} tracks into \"{saved_name}\"."));
+            }
+            Err(error) => self.player_message = Some(error),
+        }
+    }
+
+    fn play_playlist(&mut self, index: usize) {
+        let tracks: Vec<Track> = self.library.playlists.get(index)
+            .map(|playlist| playlist.tracks.iter().map(SavedTrack::to_track).collect())
+            .unwrap_or_default();
+        let Some(first) = self.state.set_queue(tracks) else {
+            self.player_message = Some("That playlist is empty.".to_owned());
+            return;
+        };
+        if let Some(track) = self.state.tracks.iter().find(|track| track.id == first).cloned() {
+            self.play_remote(&track);
         }
     }
 
@@ -54,6 +125,9 @@ impl TweMusicApp {
         let result = self.ensure_player().and_then(|player| player.load_url(&url));
         match result {
             Ok(()) => {
+                if !self.state.tracks.iter().any(|existing| existing.id == track.id) {
+                    self.state.tracks.push(track.clone());
+                }
                 self.state.play_track(track.id);
                 self.position = None;
                 self.duration = None;
@@ -209,6 +283,12 @@ impl TweMusicApp {
         let video_id = track.video_id.clone();
         let mut open_error = None;
         let mut play_requested = false;
+        let mut like_requested = false;
+        let mut remove_requested = false;
+        let mut add_to: Option<usize> = None;
+        let in_library_view = self.state.screen == Screen::Library;
+        let liked = self.library.is_liked(track);
+        let playlist_names: Vec<String> = self.library.playlists.iter().map(|playlist| playlist.name.clone()).collect();
         egui::Frame::group(ui.style())
             .fill(theme::SURFACE_CONTAINER)
             .inner_margin(Margin::same(10.0))
@@ -226,6 +306,19 @@ impl TweMusicApp {
                     ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                         if let Some(video_id) = &video_id {
                             if ui.button("Play").clicked() { play_requested = true; }
+                            if in_library_view {
+                                if ui.button("Remove").clicked() { remove_requested = true; }
+                            } else {
+                                ui.menu_button("Add to…", |ui| {
+                                    for (index, name) in playlist_names.iter().enumerate() {
+                                        if ui.button(name.as_str()).clicked() {
+                                            add_to = Some(index);
+                                            ui.close_menu();
+                                        }
+                                    }
+                                });
+                            }
+                            if ui.button(if liked { "Liked" } else { "Like" }).clicked() { like_requested = true; }
                             if ui.button("Open on web").clicked() {
                                 match ytmusic::youtube_music_url(video_id) {
                                     Some(url) => if let Err(error) = webbrowser::open(&url) {
@@ -244,6 +337,26 @@ impl TweMusicApp {
             });
         if let Some(error) = open_error { self.player_message = Some(error); }
         if play_requested { self.play_remote(track); }
+        if like_requested {
+            let now_liked = self.library.toggle_like(track);
+            self.save_library();
+            self.player_message = Some(if now_liked { "Added to Liked songs." } else { "Removed from Liked songs." }.to_owned());
+        }
+        if let Some(index) = add_to {
+            let name = self.library.playlists.get(index).map(|playlist| playlist.name.clone()).unwrap_or_default();
+            self.player_message = Some(if self.library.add(index, track) {
+                format!("Added to \"{name}\".")
+            } else {
+                format!("Already in \"{name}\".")
+            });
+            self.save_library();
+        }
+        if remove_requested {
+            if let Some(video_id) = &track.video_id {
+                self.library.remove(self.selected_playlist, video_id);
+                self.save_library();
+            }
+        }
         ui.add_space(8.0);
     }
 
@@ -291,17 +404,67 @@ impl TweMusicApp {
         });
     }
 
-    fn render_library(&mut self, ui: &mut egui::Ui) {
-        Self::page_intro(ui, "Collection", "Your library", "Your saved music, all in one place.");
-        egui::Frame::group(ui.style()).fill(theme::SURFACE_CONTAINER).inner_margin(Margin::same(18.0)).show(ui, |ui| {
-            ui.label(RichText::new("Your library is waiting").strong().size(17.0));
-            ui.add_space(5.0);
-            ui.label(RichText::new("Saved music will appear here when an account is connected.").color(theme::ON_SURFACE_VARIANT));
+    fn render_library(&mut self, ui: &mut egui::Ui, ctx: &Context) {
+        Self::page_intro(ui, "Collection", "Your library", "Liked songs and playlists are saved on this computer.");
+        ui.horizontal(|ui| {
+            let width = (ui.available_width() - 112.0).max(160.0);
+            ui.add_sized([width, 36.0], egui::TextEdit::singleline(&mut self.new_playlist_name).hint_text("New playlist name"));
+            if ui.add_sized([100.0, 36.0], Button::new("Create")).clicked() {
+                match self.library.create(&self.new_playlist_name) {
+                    Some(index) => {
+                        self.selected_playlist = index;
+                        self.new_playlist_name.clear();
+                        self.save_library();
+                    }
+                    None => self.player_message = Some("Enter a playlist name that isn't already used.".to_owned()),
+                }
+            }
         });
-        ui.add_space(22.0);
-        ui.heading("Demo tracks");
+        ui.add_space(8.0);
+        ui.horizontal(|ui| {
+            let width = (ui.available_width() - 112.0).max(160.0);
+            ui.add_sized([width, 36.0], egui::TextEdit::singleline(&mut self.import_url).hint_text("Import a public playlist link"));
+            if ui.add_sized([100.0, 36.0], Button::new("Import")).clicked() { self.start_import(ctx); }
+        });
+        if let Some(message) = &self.player_message {
+            ui.add_space(8.0);
+            ui.label(RichText::new(message).color(theme::ON_SURFACE_VARIANT));
+        }
+        ui.add_space(14.0);
+
+        if self.selected_playlist >= self.library.playlists.len() { self.selected_playlist = 0; }
+        let labels: Vec<String> = self.library.playlists.iter()
+            .map(|playlist| format!("{} ({})", playlist.name, playlist.tracks.len()))
+            .collect();
+        ui.horizontal_wrapped(|ui| {
+            for (index, label) in labels.iter().enumerate() {
+                if ui.selectable_label(self.selected_playlist == index, label.as_str()).clicked() {
+                    self.selected_playlist = index;
+                }
+            }
+        });
+        ui.add_space(14.0);
+
+        let selected = self.selected_playlist;
+        let name = self.library.playlists[selected].name.clone();
+        let tracks: Vec<Track> = self.library.playlists[selected].tracks.iter().map(SavedTrack::to_track).collect();
+        let mut delete_requested = false;
+        ui.horizontal(|ui| {
+            ui.heading(name);
+            ui.add_space(8.0);
+            if ui.add_enabled(!tracks.is_empty(), Button::new("Play all")).clicked() { self.play_playlist(selected); }
+            if selected > 0 && ui.button("Delete playlist").clicked() { delete_requested = true; }
+        });
+        if delete_requested {
+            self.library.delete(selected);
+            self.selected_playlist = 0;
+            self.save_library();
+            return;
+        }
         ui.add_space(10.0);
-        let tracks = self.state.tracks.clone();
+        if tracks.is_empty() {
+            ui.label(RichText::new("Nothing here yet. Use Like or Add to… on a search result, or import a playlist.").color(theme::ON_SURFACE_VARIANT));
+        }
         ScrollArea::vertical().show(ui, |ui| {
             for (index, track) in tracks.iter().enumerate() { self.track_row(ui, track, index); }
         });
@@ -379,6 +542,7 @@ impl TweMusicApp {
 impl eframe::App for TweMusicApp {
     fn update(&mut self, ctx: &Context, _frame: &mut eframe::Frame) {
         self.poll_search();
+        self.poll_import();
         self.tick_player(ctx);
         ctx.set_visuals(theme::dark_visuals());
         TopBottomPanel::top("top-bar")
@@ -417,7 +581,7 @@ impl eframe::App for TweMusicApp {
             .show(ctx, |ui| match self.state.screen {
                 Screen::Home => self.render_home(ui),
                 Screen::Search => self.render_search(ui, ctx),
-                Screen::Library => self.render_library(ui),
+                Screen::Library => self.render_library(ui, ctx),
                 Screen::Settings => self.render_settings(ui),
             });
         self.render_player(ctx);

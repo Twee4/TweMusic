@@ -6,6 +6,7 @@ TweMusic is a Linux-first music client prototype written in Rust.
 
 - Search YouTube Music for public metadata (unofficial endpoint; may change).
 - Play a result: MPV streams the audio only (no video, no ads) using yt-dlp, with a queue, previous/next and auto-advance.
+- Keep a library: Liked songs and your own playlists (saved in `~/.local/share/twe_music/library.json`), plus import of public playlists by link. Play a whole playlist in order.
 - Open a result on the official YouTube Music website in your browser.
 - Play local audio files with MPV.
 

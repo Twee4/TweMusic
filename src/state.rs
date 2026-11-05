@@ -87,6 +87,20 @@ impl AppState {
         };
     }
 
+    /// Replaces the queue with these tracks (adding unknown ones to the track list) and
+    /// returns the first one, if any.
+    pub fn set_queue(&mut self, tracks: Vec<Track>) -> Option<TrackId> {
+        let mut queue = Vec::with_capacity(tracks.len());
+        for track in tracks {
+            queue.push(track.id);
+            if !self.tracks.iter().any(|existing| existing.id == track.id) {
+                self.tracks.push(track);
+            }
+        }
+        self.queue = queue;
+        self.queue.first().copied()
+    }
+
     /// The nearest queued YouTube track before or after the current one, skipping demo tracks.
     pub fn adjacent_remote(&self, forward: bool) -> Option<TrackId> {
         let index = self.current_track.and_then(|id| self.queue.iter().position(|queued| *queued == id))?;
@@ -152,6 +166,17 @@ mod tests {
         assert_eq!(state.playback, PlaybackStatus::Paused);
         state.toggle_playback();
         assert_eq!(state.playback, PlaybackStatus::Playing);
+    }
+
+    #[test]
+    fn set_queue_replaces_queue_and_returns_first() {
+        let mut state = AppState::new();
+        assert_eq!(state.set_queue(Vec::new()), None);
+        let mut track = Track::new(300, "C", "Z", None, 10);
+        track.video_id = Some("ccccccccccc".to_owned());
+        assert_eq!(state.set_queue(vec![track]), Some(TrackId(300)));
+        assert_eq!(state.queue, vec![TrackId(300)]);
+        assert!(state.tracks.iter().any(|existing| existing.id == TrackId(300)));
     }
 
     #[test]

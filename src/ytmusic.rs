@@ -200,7 +200,7 @@ fn parse_duration(value: &str) -> Option<Duration> {
     Some(Duration::from_secs(hours.saturating_mul(3600).saturating_add(minutes.saturating_mul(60)).saturating_add(seconds)))
 }
 
-fn stable_id(value: &str) -> u64 {
+pub(crate) fn stable_id(value: &str) -> u64 {
     value.bytes().fold(0xcbf29ce484222325_u64, |hash, byte| {
         (hash ^ u64::from(byte)).wrapping_mul(0x100000001b3)
     })
