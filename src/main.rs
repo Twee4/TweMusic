@@ -108,49 +108,71 @@ impl TweMusicApp {
 
     fn nav_button(&mut self, ui: &mut egui::Ui, title: &str, screen: Screen) {
         let active = self.state.screen == screen;
-        let response = ui.add_sized([160.0, 42.0], Button::new(RichText::new(title).size(15.0))
-            .fill(if active { theme::PRIMARY } else { Color32::TRANSPARENT }));
+        let text_color = if active { theme::ON_PRIMARY_CONTAINER } else { theme::ON_SURFACE_VARIANT };
+        let response = ui.add_sized(
+            [ui.available_width(), 44.0],
+            Button::new(RichText::new(title).size(15.0).color(text_color))
+                .fill(if active { theme::PRIMARY_CONTAINER } else { Color32::TRANSPARENT }),
+        );
         if response.clicked() { self.state.screen = screen; }
     }
 
     fn track_row(&mut self, ui: &mut egui::Ui, track: &Track, index: usize) {
         let video_id = track.video_id.clone();
         let mut open_error = None;
-        ui.horizontal(|ui| {
-            let color = theme::COVER_COLORS[index % theme::COVER_COLORS.len()];
-            let (rect, _) = ui.allocate_exact_size(egui::vec2(44.0, 44.0), egui::Sense::hover());
-            ui.painter().rect_filled(rect, 8.0, color);
-            ui.add_space(8.0);
-            ui.vertical(|ui| {
-                ui.label(RichText::new(&track.title).strong());
-                ui.label(RichText::new(&track.artist).color(theme::ON_SURFACE_VARIANT));
-            });
-            ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                if let Some(video_id) = &video_id {
-                    if ui.button("Open in YouTube Music").clicked() {
-                        match ytmusic::youtube_music_url(video_id) {
-                            Some(url) => if let Err(error) = webbrowser::open(&url) {
-                                open_error = Some(format!("Could not open YouTube Music: {error}"));
-                            },
-                            None => open_error = Some("YouTube returned an invalid video ID.".to_owned()),
+        egui::Frame::group(ui.style())
+            .fill(theme::SURFACE_CONTAINER)
+            .inner_margin(Margin::same(10.0))
+            .show(ui, |ui| {
+                ui.horizontal(|ui| {
+                    let color = theme::COVER_COLORS[index % theme::COVER_COLORS.len()];
+                    let (rect, _) = ui.allocate_exact_size(egui::vec2(48.0, 48.0), egui::Sense::hover());
+                    ui.painter().rect_filled(rect, 10.0, color);
+                    ui.painter().text(rect.center(), egui::Align2::CENTER_CENTER, "♪", egui::FontId::proportional(24.0), Color32::WHITE);
+                    ui.add_space(12.0);
+                    ui.vertical(|ui| {
+                        ui.label(RichText::new(&track.title).strong().size(15.0));
+                        ui.label(RichText::new(&track.artist).color(theme::ON_SURFACE_VARIANT));
+                    });
+                    ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                        if let Some(video_id) = &video_id {
+                            if ui.button("Open in YouTube Music").clicked() {
+                                match ytmusic::youtube_music_url(video_id) {
+                                    Some(url) => if let Err(error) = webbrowser::open(&url) {
+                                        open_error = Some(format!("Could not open YouTube Music: {error}"));
+                                    },
+                                    None => open_error = Some("YouTube returned an invalid video ID.".to_owned()),
+                                }
+                            }
+                        } else if ui.button("Queue demo track").clicked() {
+                            self.state.play_track(track.id);
                         }
-                    }
-                } else if ui.button("Queue demo track").clicked() {
-                    self.state.play_track(track.id);
-                }
-                ui.label(track.duration_label());
+                        ui.add_space(8.0);
+                        ui.label(RichText::new(track.duration_label()).color(theme::ON_SURFACE_VARIANT));
+                    });
+                });
             });
-        });
         if let Some(error) = open_error { self.player_message = Some(error); }
         ui.add_space(8.0);
     }
 
+    fn page_intro(ui: &mut egui::Ui, eyebrow: &str, title: &str, description: &str) {
+        ui.label(RichText::new(eyebrow.to_uppercase()).size(11.0).strong().color(theme::PRIMARY));
+        ui.add_space(4.0);
+        ui.heading(RichText::new(title).size(30.0));
+        ui.add_space(4.0);
+        ui.label(RichText::new(description).color(theme::ON_SURFACE_VARIANT));
+        ui.add_space(22.0);
+    }
+
     fn render_home(&mut self, ui: &mut egui::Ui) {
-        ui.heading("Good evening");
-        ui.label(RichText::new("A little music for your day").color(theme::ON_SURFACE_VARIANT));
-        ui.add_space(18.0);
-        ui.heading("Quick picks");
-        ui.add_space(8.0);
+        Self::page_intro(ui, "Your soundtrack", "Good evening", "Find something lovely to listen to.");
+        ui.horizontal(|ui| {
+            ui.heading("Quick picks");
+            ui.add_space(8.0);
+            ui.label(RichText::new("A few tracks to get you started").color(theme::ON_SURFACE_VARIANT));
+        });
+        ui.add_space(12.0);
         let tracks = self.state.tracks.clone();
         ScrollArea::vertical().show(ui, |ui| {
             for (index, track) in tracks.iter().enumerate() { self.track_row(ui, track, index); }
@@ -158,16 +180,19 @@ impl TweMusicApp {
     }
 
     fn render_search(&mut self, ui: &mut egui::Ui, ctx: &Context) {
-        ui.heading("Search YouTube Music");
-        ui.add_space(12.0);
-        let response = ui.add_sized([ui.available_width(), 42.0], egui::TextEdit::singleline(&mut self.state.search_query)
-            .hint_text("Search songs and artists"));
-        let submitted = response.lost_focus() && ui.input(|input| input.key_pressed(egui::Key::Enter));
-        let clicked = ui.add(Button::new("Search").fill(theme::PRIMARY)).clicked();
-        if submitted || clicked { self.start_search(ctx); }
+        Self::page_intro(ui, "Explore", "Search music", "Discover songs and artists on YouTube Music.");
+        ui.horizontal(|ui| {
+            let width = (ui.available_width() - 112.0).max(180.0);
+            let response = ui.add_sized([width, 44.0], egui::TextEdit::singleline(&mut self.state.search_query)
+                .hint_text("Try a song, artist, or album"));
+            let submitted = response.lost_focus() && ui.input(|input| input.key_pressed(egui::Key::Enter));
+            let clicked = ui.add_sized([100.0, 44.0], Button::new("Search").fill(theme::PRIMARY_CONTAINER)).clicked();
+            if submitted || clicked { self.start_search(ctx); }
+        });
         ui.add_space(12.0);
         if let Some(message) = &self.state.search_message {
             ui.label(RichText::new(message).color(theme::ON_SURFACE_VARIANT));
+            ui.add_space(8.0);
         }
         let results = self.state.remote_results.clone();
         ScrollArea::vertical().show(ui, |ui| {
@@ -176,11 +201,15 @@ impl TweMusicApp {
     }
 
     fn render_library(&mut self, ui: &mut egui::Ui) {
-        ui.heading("Your library");
-        ui.add_space(8.0);
-        ui.label(RichText::new("Saved music will appear here when an account is connected.").color(theme::ON_SURFACE_VARIANT));
-        ui.add_space(16.0);
+        Self::page_intro(ui, "Collection", "Your library", "Your saved music, all in one place.");
+        egui::Frame::group(ui.style()).fill(theme::SURFACE_CONTAINER).inner_margin(Margin::same(18.0)).show(ui, |ui| {
+            ui.label(RichText::new("Your library is waiting").strong().size(17.0));
+            ui.add_space(5.0);
+            ui.label(RichText::new("Saved music will appear here when an account is connected.").color(theme::ON_SURFACE_VARIANT));
+        });
+        ui.add_space(22.0);
         ui.heading("Demo tracks");
+        ui.add_space(10.0);
         let tracks = self.state.tracks.clone();
         ScrollArea::vertical().show(ui, |ui| {
             for (index, track) in tracks.iter().enumerate() { self.track_row(ui, track, index); }
@@ -188,45 +217,51 @@ impl TweMusicApp {
     }
 
     fn render_settings(&mut self, ui: &mut egui::Ui) {
-        ui.heading("Settings");
-        ui.add_space(16.0);
-        ui.group(|ui| {
-            ui.set_min_width(420.0);
-            ui.label(RichText::new("Local audio playback").strong());
-            ui.add_space(8.0);
-            ui.label("MPV is used to play files on your device.");
+        Self::page_intro(ui, "Preferences", "Settings", "Manage playback and learn how TweMusic works.");
+        egui::Frame::group(ui.style()).fill(theme::SURFACE_CONTAINER).inner_margin(Margin::same(18.0)).show(ui, |ui| {
+            ui.label(RichText::new("Local audio playback").strong().size(17.0));
+            ui.add_space(4.0);
+            ui.label(RichText::new("Play a file from your device using MPV.").color(theme::ON_SURFACE_VARIANT));
+            ui.add_space(12.0);
             ui.horizontal(|ui| {
-                ui.add_sized([320.0, 36.0], egui::TextEdit::singleline(&mut self.local_file_path).hint_text("/path/to/audio-file"));
-                if ui.button("Play file").clicked() { self.start_local_playback(); }
+                ui.add_sized([ui.available_width() - 110.0, 40.0], egui::TextEdit::singleline(&mut self.local_file_path).hint_text("/path/to/audio-file"));
+                if ui.add_sized([100.0, 40.0], Button::new("Play file").fill(theme::PRIMARY_CONTAINER)).clicked() { self.start_local_playback(); }
             });
             if let Some(message) = &self.player_message {
+                ui.add_space(8.0);
                 ui.label(RichText::new(message).color(theme::ON_SURFACE_VARIANT));
             }
         });
         ui.add_space(12.0);
-        ui.group(|ui| {
-            ui.set_min_width(420.0);
-            ui.label(RichText::new("YouTube Music").strong());
-            ui.add_space(8.0);
-            ui.label("Search returns public metadata. Open a result to listen on music.youtube.com.");
-            ui.label("The app does not extract or download YouTube audio streams.");
+        egui::Frame::group(ui.style()).fill(theme::SURFACE_CONTAINER).inner_margin(Margin::same(18.0)).show(ui, |ui| {
+            ui.label(RichText::new("YouTube Music").strong().size(17.0));
+            ui.add_space(4.0);
+            ui.label(RichText::new("Search returns public metadata. Open a result to listen on music.youtube.com.").color(theme::ON_SURFACE_VARIANT));
+            ui.add_space(4.0);
+            ui.label(RichText::new("TweMusic does not extract or download YouTube audio streams.").color(theme::ON_SURFACE_VARIANT));
         });
     }
 
     fn render_player(&mut self, ctx: &Context) {
-        TopBottomPanel::bottom("player-panel").show(ctx, |ui| {
-            ui.add_space(5.0);
-            ui.horizontal(|ui| {
-                ui.vertical(|ui| {
-                    ui.label(RichText::new(if self.mpv.is_some() { "Local audio player" } else { "Nothing playing" }).strong());
-                    ui.label(RichText::new("MPV · local files").color(theme::ON_SURFACE_VARIANT));
-                });
-                ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                    if ui.button("Play / Pause").clicked() { self.toggle_local_playback(); }
+        TopBottomPanel::bottom("player-panel")
+            .frame(egui::Frame::none().fill(theme::SURFACE_CONTAINER).inner_margin(Margin::same(12.0)))
+            .show(ctx, |ui| {
+                ui.horizontal(|ui| {
+                    let (rect, _) = ui.allocate_exact_size(egui::vec2(42.0, 42.0), egui::Sense::hover());
+                    ui.painter().rect_filled(rect, 9.0, theme::PRIMARY_CONTAINER);
+                    ui.painter().text(rect.center(), egui::Align2::CENTER_CENTER, "♪", egui::FontId::proportional(21.0), theme::ON_PRIMARY_CONTAINER);
+                    ui.add_space(8.0);
+                    ui.vertical(|ui| {
+                        ui.label(RichText::new(if self.mpv.is_some() { "Local audio player" } else { "Nothing playing" }).strong());
+                        ui.label(RichText::new(if self.state.playback == PlaybackStatus::Playing { "Playing · MPV local files" } else { "Ready for your next song" }).size(12.0).color(theme::ON_SURFACE_VARIANT));
+                    });
+                    ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                        if ui.add_sized([120.0, 38.0], Button::new(if self.state.playback == PlaybackStatus::Playing { "Pause" } else { "Play" }).fill(theme::PRIMARY_CONTAINER)).clicked() {
+                            self.toggle_local_playback();
+                        }
+                    });
                 });
             });
-            ui.add_space(5.0);
-        });
     }
 }
 
@@ -234,35 +269,52 @@ impl eframe::App for TweMusicApp {
     fn update(&mut self, ctx: &Context, _frame: &mut eframe::Frame) {
         self.poll_search();
         ctx.set_visuals(theme::dark_visuals());
-        TopBottomPanel::top("top-bar").frame(egui::Frame::none().inner_margin(Margin::same(12.0))).show(ctx, |ui| {
-            ui.horizontal(|ui| {
-                ui.heading("TweMusic");
-                ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                    ui.label(RichText::new("Search and browser playback").color(theme::ON_SURFACE_VARIANT));
+        TopBottomPanel::top("top-bar")
+            .frame(egui::Frame::none().fill(theme::SURFACE).inner_margin(Margin::same(16.0)))
+            .show(ctx, |ui| {
+                ui.horizontal(|ui| {
+                    let (rect, _) = ui.allocate_exact_size(egui::vec2(34.0, 34.0), egui::Sense::hover());
+                    ui.painter().rect_filled(rect, 10.0, theme::PRIMARY_CONTAINER);
+                    ui.painter().text(rect.center(), egui::Align2::CENTER_CENTER, "♪", egui::FontId::proportional(20.0), theme::ON_PRIMARY_CONTAINER);
+                    ui.add_space(8.0);
+                    ui.label(RichText::new("TweMusic").size(20.0).strong());
+                    ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                        ui.label(RichText::new("SEARCH · DISCOVER · LISTEN").size(11.0).strong().color(theme::ON_SURFACE_VARIANT));
+                    });
                 });
             });
-        });
-        SidePanel::left("navigation").resizable(false).default_width(184.0)
-            .frame(egui::Frame::none().inner_margin(Margin::same(12.0))).show(ctx, |ui| {
-                ui.add_space(8.0);
-                self.nav_button(ui, "Home", Screen::Home);
-                self.nav_button(ui, "Search", Screen::Search);
-                self.nav_button(ui, "Library", Screen::Library);
-                self.nav_button(ui, "Settings", Screen::Settings);
+        SidePanel::left("navigation").resizable(false).default_width(196.0)
+            .frame(egui::Frame::none().fill(theme::SURFACE).inner_margin(Margin::same(14.0))).show(ctx, |ui| {
+                ui.add_space(12.0);
+                ui.label(RichText::new("MENU").size(11.0).strong().color(theme::ON_SURFACE_VARIANT));
+                ui.add_space(10.0);
+                self.nav_button(ui, "⌂   Home", Screen::Home);
+                ui.add_space(4.0);
+                self.nav_button(ui, "⌕   Search", Screen::Search);
+                ui.add_space(4.0);
+                self.nav_button(ui, "♫   Library", Screen::Library);
+                ui.add_space(4.0);
+                self.nav_button(ui, "⚙   Settings", Screen::Settings);
+                ui.with_layout(Layout::bottom_up(Align::Min), |ui| {
+                    ui.label(RichText::new("Made for listening").size(12.0).color(theme::ON_SURFACE_VARIANT));
+                    ui.add_space(4.0);
+                });
             });
-        CentralPanel::default().show(ctx, |ui| match self.state.screen {
-            Screen::Home => self.render_home(ui),
-            Screen::Search => self.render_search(ui, ctx),
-            Screen::Library => self.render_library(ui),
-            Screen::Settings => self.render_settings(ui),
-        });
+        CentralPanel::default()
+            .frame(egui::Frame::none().fill(theme::BACKGROUND).inner_margin(Margin::same(26.0)))
+            .show(ctx, |ui| match self.state.screen {
+                Screen::Home => self.render_home(ui),
+                Screen::Search => self.render_search(ui, ctx),
+                Screen::Library => self.render_library(ui),
+                Screen::Settings => self.render_settings(ui),
+            });
         self.render_player(ctx);
     }
 }
 
 fn main() -> eframe::Result<()> {
     let options = eframe::NativeOptions {
-        viewport: egui::ViewportBuilder::default().with_inner_size([1100.0, 760.0])
+        viewport: eframe::egui::ViewportBuilder::default().with_inner_size([1100.0, 760.0])
             .with_min_inner_size([720.0, 520.0]).with_title("TweMusic"),
         ..Default::default()
     };
