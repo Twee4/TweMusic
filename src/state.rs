@@ -12,6 +12,8 @@ pub struct AppState {
     pub screen: Screen,
     pub search_query: String,
     pub tracks: Vec<Track>,
+    pub remote_results: Vec<Track>,
+    pub search_message: Option<String>,
     pub queue: Vec<TrackId>,
     pub current_track: Option<TrackId>,
     pub playback: PlaybackStatus,
@@ -32,6 +34,8 @@ impl AppState {
             screen: Screen::Home,
             search_query: String::new(),
             tracks,
+            remote_results: Vec::new(),
+            search_message: None,
             queue,
             current_track: None,
             playback: PlaybackStatus::Stopped,
@@ -40,9 +44,7 @@ impl AppState {
 
     pub fn search_results(&self) -> Vec<&Track> {
         let query = self.search_query.trim().to_lowercase();
-        if query.is_empty() {
-            return Vec::new();
-        }
+        if query.is_empty() { return Vec::new(); }
         self.tracks.iter().filter(|track| {
             track.title.to_lowercase().contains(&query)
                 || track.artist.to_lowercase().contains(&query)
@@ -55,21 +57,28 @@ impl AppState {
         self.tracks.iter().find(|track| track.id == id)
     }
 
+    pub fn add_search_results(&mut self, tracks: Vec<Track>) {
+        self.remote_results = tracks;
+        self.search_message = None;
+        for track in &self.remote_results {
+            if !self.tracks.iter().any(|existing| existing.id == track.id) {
+                self.tracks.push(track.clone());
+                self.queue.push(track.id);
+            }
+        }
+    }
+
     pub fn play_track(&mut self, id: TrackId) {
         if self.tracks.iter().any(|track| track.id == id) {
             self.current_track = Some(id);
             self.playback = PlaybackStatus::Playing;
-            if !self.queue.contains(&id) {
-                self.queue.push(id);
-            }
+            if !self.queue.contains(&id) { self.queue.push(id); }
         }
     }
 
     pub fn toggle_playback(&mut self) {
         if self.current_track.is_none() {
-            if let Some(first) = self.queue.first().copied() {
-                self.play_track(first);
-            }
+            if let Some(first) = self.queue.first().copied() { self.play_track(first); }
             return;
         }
         self.playback = match self.playback {

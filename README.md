@@ -5,14 +5,16 @@ TweMusic is a Linux-first desktop music client prototype written in Rust, with a
 ## Stages
 
 1. Desktop shell and design system
-2. App state, navigation, typed track models, search over a demo catalog, and queue controls
-3. YouTube Music service client and account flow
+2. App state, navigation, typed track models, local search, and queue controls
+3. YouTube Music metadata search
 4. Playback engine and Linux MPRIS/media-key integration
 5. Packaging and polish
 
-## Current stage: Stage 2
+## Current stage: Stage 3
 
-The app has typed track IDs and metadata, application state for navigation/search/queue/playback, case-insensitive local catalog search, and player controls wired to the in-memory queue. The catalog is demo data: there is no YouTube Music connection or real audio playback yet.
+The Search screen can request public track metadata from YouTube Music. Search runs on a worker thread so the window remains responsive. Results are parsed into typed track models and can be added to the prototype's in-memory queue.
+
+This uses an **undocumented YouTube Music endpoint**, which can change or stop working. It is metadata search only: this build does not authenticate, download, or play audio. Use the service in accordance with YouTube's terms and applicable law.
 
 ## Run
 
@@ -20,12 +22,14 @@ The app has typed track IDs and metadata, application state for navigation/searc
 cargo run
 ```
 
-Run the state-model tests with:
+Run the unit tests with:
 
 ```bash
 cargo test
 ```
 
+Search requires an internet connection. If it fails, check the message in the Search screen; endpoint or response changes may require updating `src/ytmusic.rs`.
+
 ## Linux build prerequisites
 
-`eframe` uses native windowing and graphics libraries. On Debian/Ubuntu, install the system packages required by the selected backend before compiling if Cargo reports missing `pkg-config` libraries.
+`eframe` uses native windowing and graphics libraries. Install the system packages required by the selected backend if Cargo reports missing `pkg-config` libraries.
