@@ -1,18 +1,23 @@
-use std::sync::mpsc::{self, Receiver, TryRecvError};
-use std::thread;
+use std::{fs, path::PathBuf, sync::mpsc::{self, Receiver, TryRecvError}, thread};
 
 use eframe::egui::{self, Align, Button, CentralPanel, Color32, Context, Layout, Margin, RichText, ScrollArea, SidePanel, TopBottomPanel};
-use twe_music::{models::{Screen, Track}, state::{AppState, PlaybackStatus}, theme};
+use twe_music::{models::{Screen, Track}, mpv::MpvPlayer, state::{AppState, PlaybackStatus}, theme};
 
 struct TweMusicApp {
     state: AppState,
     search_rx: Option<Receiver<Result<Vec<Track>, String>>>,
     search_in_flight: bool,
+    mpv: Option<MpvPlayer>,
+    local_file_path: String,
+    player_message: Option<String>,
 }
 
 impl TweMusicApp {
     fn new() -> Self {
-        Self { state: AppState::new(), search_rx: None, search_in_flight: false }
+        Self {
+            state: AppState::new(), search_rx: None, search_in_flight: false,
+            mpv: None, local_file_path: String::new(), player_message: None,
+        }
     }
 
     fn start_search(&mut self, ctx: &Context) {
@@ -55,6 +60,52 @@ impl TweMusicApp {
         }
     }
 
+    fn start_local_playback(&mut self) {
+        let input = self.local_file_path.trim();
+        if input.is_empty() {
+            self.player_message = Some("Enter a local audio file path first.".to_owned());
+            return;
+        }
+        let path = PathBuf::from(input);
+        let canonical = match fs::canonicalize(&path) {
+            Ok(path) if path.is_file() => path,
+            Ok(_) => { self.player_message = Some("The selected path is not a file.".to_owned()); return; }
+            Err(error) => { self.player_message = Some(format!("Cannot open file: {error}")); return; }
+        };
+        if let Some(player) = &mut self.mpv {
+            match player.load_file(&canonical) {
+                Ok(()) => {
+                    self.state.playback = PlaybackStatus::Playing;
+                    self.player_message = Some(format!("Playing {}", canonical.display()));
+                }
+                Err(error) => self.player_message = Some(error.to_string()),
+            }
+        } else {
+            match MpvPlayer::start().and_then(|mut player| { player.load_file(&canonical)?; Ok(player) }) {
+                Ok(player) => {
+                    self.mpv = Some(player);
+                    self.state.playback = PlaybackStatus::Playing;
+                    self.player_message = Some(format!("Playing {}", canonical.display()));
+                }
+                Err(error) => self.player_message = Some(error.to_string()),
+            }
+        }
+    }
+
+    fn toggle_local_playback(&mut self) {
+        let Some(player) = &mut self.mpv else {
+            self.player_message = Some("Choose a local audio file in Settings to start playback.".to_owned());
+            return;
+        };
+        match player.toggle_pause() {
+            Ok(paused) => {
+                self.state.playback = if paused { PlaybackStatus::Paused } else { PlaybackStatus::Playing };
+                self.player_message = Some(if paused { "Paused" } else { "Playing" }.to_owned());
+            }
+            Err(error) => self.player_message = Some(error.to_string()),
+        }
+    }
+
     fn nav_button(&mut self, ui: &mut egui::Ui, title: &str, screen: Screen) {
         let active = self.state.screen == screen;
         let response = ui.add_sized([160.0, 42.0], Button::new(RichText::new(title).size(15.0))
@@ -73,7 +124,7 @@ impl TweMusicApp {
                 ui.label(RichText::new(&track.artist).color(theme::ON_SURFACE_VARIANT));
             });
             ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                if ui.button("Play").clicked() { self.state.play_track(track.id); }
+                if ui.button("Queue").clicked() { self.state.play_track(track.id); }
                 ui.label(track.duration_label());
             });
         });
@@ -126,18 +177,24 @@ impl TweMusicApp {
         ui.heading("Settings");
         ui.add_space(16.0);
         ui.group(|ui| {
-            ui.set_min_width(360.0);
-            ui.label(RichText::new("Appearance").strong());
+            ui.set_min_width(420.0);
+            ui.label(RichText::new("Local audio playback").strong());
             ui.add_space(8.0);
-            ui.label("Material 3-inspired dark theme");
+            ui.label("MPV is used to play files on your device.");
+            ui.horizontal(|ui| {
+                ui.add_sized([320.0, 36.0], egui::TextEdit::singleline(&mut self.local_file_path).hint_text("/path/to/audio-file"));
+                if ui.button("Play file").clicked() { self.start_local_playback(); }
+            });
+            if let Some(message) = &self.player_message {
+                ui.label(RichText::new(message).color(theme::ON_SURFACE_VARIANT));
+            }
         });
         ui.add_space(12.0);
         ui.group(|ui| {
-            ui.set_min_width(360.0);
+            ui.set_min_width(420.0);
             ui.label(RichText::new("YouTube Music").strong());
             ui.add_space(8.0);
-            ui.label("Search accesses public track metadata without signing in.");
-            ui.label("This prototype does not download or play audio.");
+            ui.label("Search returns public metadata only. Search results are not playable yet.");
         });
     }
 
@@ -145,17 +202,12 @@ impl TweMusicApp {
         TopBottomPanel::bottom("player-panel").show(ctx, |ui| {
             ui.add_space(5.0);
             ui.horizontal(|ui| {
-                if let Some(track) = self.state.current_track().cloned() {
-                    ui.vertical(|ui| {
-                        ui.label(RichText::new(track.title).strong());
-                        ui.label(RichText::new(track.artist).color(theme::ON_SURFACE_VARIANT));
-                    });
-                } else { ui.label(RichText::new("Nothing playing").color(theme::ON_SURFACE_VARIANT)); }
+                ui.vertical(|ui| {
+                    ui.label(RichText::new(if self.mpv.is_some() { "Local audio player" } else { "Nothing playing" }).strong());
+                    ui.label(RichText::new("MPV · local files").color(theme::ON_SURFACE_VARIANT));
+                });
                 ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                    if ui.button("Next").clicked() { self.state.next_track(); }
-                    let label = if self.state.playback == PlaybackStatus::Playing { "Pause" } else { "Play" };
-                    if ui.button(label).clicked() { self.state.toggle_playback(); }
-                    if ui.button("Previous").clicked() { self.state.previous_track(); }
+                    if ui.button("Play / Pause").clicked() { self.toggle_local_playback(); }
                 });
             });
             ui.add_space(5.0);
@@ -171,7 +223,7 @@ impl eframe::App for TweMusicApp {
             ui.horizontal(|ui| {
                 ui.heading("TweMusic");
                 ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                    ui.label(RichText::new("Stage 3 · metadata search").color(theme::ON_SURFACE_VARIANT));
+                    ui.label(RichText::new("Stage 4 · MPV local playback").color(theme::ON_SURFACE_VARIANT));
                 });
             });
         });

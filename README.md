@@ -7,29 +7,28 @@ TweMusic is a Linux-first desktop music client prototype written in Rust, with a
 1. Desktop shell and design system
 2. App state, navigation, typed track models, local search, and queue controls
 3. YouTube Music metadata search
-4. Playback engine and Linux MPRIS/media-key integration
-5. Packaging and polish
+4. MPV local-file playback
+5. YouTube Music playback, MPRIS integration, packaging, and polish
 
-## Current stage: Stage 3
+## Current stage: Stage 4
 
-The Search screen can request public track metadata from YouTube Music. Search runs on a worker thread so the window remains responsive. Results are parsed into typed track models and can be added to the prototype's in-memory queue.
+TweMusic can play a local audio file through MPV. In **Settings**, enter the path to an audio file and choose **Play file**; the bottom player has a play/pause control. MPV is started on demand and controlled over its local Unix-domain JSON IPC socket.
 
-This uses an **undocumented YouTube Music endpoint**, which can change or stop working. It is metadata search only: this build does not authenticate, download, or play audio. Use the service in accordance with YouTube's terms and applicable law.
+Install MPV first, for example:
 
-## Run
+```bash
+sudo apt install mpv  # Debian/Ubuntu
+sudo dnf install mpv  # Fedora
+sudo pacman -S mpv    # Arch Linux
+```
+
+YouTube Music search results are still metadata-only and cannot be played by this stage. No audio is downloaded or extracted from search results. The MPRIS desktop integration and YouTube Music playback remain future work; the current stage does not claim media-key support.
+
+## Run and test
 
 ```bash
 cargo run
-```
-
-Run the unit tests with:
-
-```bash
 cargo test
 ```
 
-Search requires an internet connection. If it fails, check the message in the Search screen; endpoint or response changes may require updating `src/ytmusic.rs`.
-
-## Linux build prerequisites
-
-`eframe` uses native windowing and graphics libraries. Install the system packages required by the selected backend if Cargo reports missing `pkg-config` libraries.
+Search requires an internet connection and relies on an undocumented endpoint that may change. Local playback requires MPV. The project is a prototype; use services in accordance with their terms and applicable law.
