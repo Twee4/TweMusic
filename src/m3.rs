@@ -1,0 +1,509 @@
+//! Material 3 components built on egui: buttons, icon buttons, filter chips, segmented
+//! buttons, cards, search bar, navigation rail/bar destinations, seek slider, snackbar.
+//!
+//! Each component is painted by hand so it can follow the Material spec (container
+//! shapes, colour roles, 8% / 10% state layers) instead of egui's default widget look.
+
+use eframe::egui::{
+    self, pos2, vec2, Align, Align2, Color32, CursorIcon, Frame, InnerResponse, Layout, Margin,
+    Rect, Response, Rounding, Sense, Stroke, Ui, UiBuilder, Vec2,
+};
+
+use crate::{
+    icons::{self, Icon},
+    theme::{self, shape, state, with_alpha, Role},
+};
+
+/// Paints the hover / focus / pressed overlay for a component. `content` is the colour the
+/// component draws its label or icon in, which is also the state layer colour.
+fn state_layer(ui: &Ui, rect: Rect, rounding: Rounding, response: &Response, content: Color32, enabled: bool) {
+    if !enabled {
+        return;
+    }
+    let alpha = if response.is_pointer_button_down_on() {
+        state::PRESSED
+    } else if response.has_focus() {
+        state::FOCUS
+    } else if response.hovered() {
+        state::HOVER
+    } else {
+        return;
+    };
+    ui.painter().rect_filled(rect, rounding, with_alpha(content, alpha));
+}
+
+fn pointer_cursor(response: Response, enabled: bool) -> Response {
+    if enabled { response.on_hover_cursor(CursorIcon::PointingHand) } else { response }
+}
+
+// ---- Buttons ----------------------------------------------------------------------
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ButtonKind {
+    /// High emphasis: the main action on a screen.
+    Filled,
+    /// Medium emphasis: important but secondary actions.
+    Tonal,
+    /// Medium emphasis with an outline.
+    Outlined,
+    /// Low emphasis.
+    Text,
+    /// A text button for destructive actions, in the error colour.
+    Destructive,
+}
+
+pub fn button(ui: &mut Ui, kind: ButtonKind, label: &str) -> Response {
+    button_enabled(ui, kind, label, true)
+}
+
+pub fn button_enabled(ui: &mut Ui, kind: ButtonKind, label: &str, enabled: bool) -> Response {
+    let c = theme::colors(ui);
+    let (container, content, outline) = match kind {
+        ButtonKind::Filled => (Some(c.primary), c.on_primary, None),
+        ButtonKind::Tonal => (Some(c.secondary_container), c.on_secondary_container, None),
+        ButtonKind::Outlined => (None, c.primary, Some(c.outline)),
+        ButtonKind::Text => (None, c.primary, None),
+        ButtonKind::Destructive => (None, c.error, None),
+    };
+    let (container, content, outline) = if enabled {
+        (container, content, outline)
+    } else {
+        (
+            container.map(|_| with_alpha(c.on_surface, state::DISABLED_CONTAINER)),
+            with_alpha(c.on_surface, state::DISABLED_CONTENT),
+            outline.map(|_| with_alpha(c.on_surface, state::DISABLED_CONTAINER)),
+        )
+    };
+
+    let galley = ui.painter().layout_no_wrap(label.to_owned(), Role::LabelLarge.font(), content);
+    let padding = if matches!(kind, ButtonKind::Text | ButtonKind::Destructive) { 12.0 } else { 24.0 };
+    let width = (galley.size().x + 2.0 * padding).max(if padding == 12.0 { 48.0 } else { 64.0 });
+    let sense = if enabled { Sense::click() } else { Sense::hover() };
+    let (rect, response) = ui.allocate_exact_size(vec2(width, 40.0), sense);
+
+    if ui.is_rect_visible(rect) {
+        let rounding = shape::full();
+        let painter = ui.painter();
+        if let Some(fill) = container {
+            painter.rect_filled(rect, rounding, fill);
+        }
+        if let Some(line) = outline {
+            painter.rect_stroke(rect, rounding, Stroke::new(1.0, line));
+        }
+        state_layer(ui, rect, rounding, &response, content, enabled);
+        painter.galley(rect.center() - galley.size() / 2.0, galley, content);
+    }
+    pointer_cursor(response, enabled)
+}
+
+// ---- Icon buttons -----------------------------------------------------------------
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum IconButtonKind {
+    /// No container. `selected` tints the icon with the primary colour.
+    Standard,
+    /// Primary container, for the single most important icon action (play / pause).
+    Filled,
+    /// Secondary container.
+    Tonal,
+}
+
+pub fn icon_button(ui: &mut Ui, kind: IconButtonKind, icon: Icon, selected: bool, tooltip: &str) -> Response {
+    icon_button_ex(ui, kind, icon, selected, true, 40.0, tooltip)
+}
+
+pub fn icon_button_ex(
+    ui: &mut Ui,
+    kind: IconButtonKind,
+    icon: Icon,
+    selected: bool,
+    enabled: bool,
+    size: f32,
+    tooltip: &str,
+) -> Response {
+    let c = theme::colors(ui);
+    let (container, content) = match (kind, selected) {
+        (IconButtonKind::Standard, false) => (None, c.on_surface_variant),
+        (IconButtonKind::Standard, true) => (None, c.primary),
+        (IconButtonKind::Filled, _) => (Some(c.primary), c.on_primary),
+        (IconButtonKind::Tonal, _) => (Some(c.secondary_container), c.on_secondary_container),
+    };
+    let (container, content) = if enabled {
+        (container, content)
+    } else {
+        (
+            container.map(|_| with_alpha(c.on_surface, state::DISABLED_CONTAINER)),
+            with_alpha(c.on_surface, state::DISABLED_CONTENT),
+        )
+    };
+
+    let sense = if enabled { Sense::click() } else { Sense::hover() };
+    let (rect, response) = ui.allocate_exact_size(vec2(size, size), sense);
+    if ui.is_rect_visible(rect) {
+        let painter = ui.painter();
+        if let Some(fill) = container {
+            painter.circle_filled(rect.center(), size / 2.0, fill);
+        }
+        state_layer(ui, rect, Rounding::same(size / 2.0), &response, content, enabled);
+        let icon_size = if size >= 40.0 { 24.0 } else { size * 0.6 };
+        icon.paint(painter, rect.center(), icon_size, content, selected);
+    }
+    let response = pointer_cursor(response, enabled);
+    if tooltip.is_empty() { response } else { response.on_hover_text(tooltip) }
+}
+
+// ---- Chips and segmented buttons --------------------------------------------------
+
+/// A filter chip: outlined when off, secondary container with a check mark when on.
+pub fn filter_chip(ui: &mut Ui, label: &str, selected: bool) -> Response {
+    let c = theme::colors(ui);
+    let (fill, content, outline) = if selected {
+        (Some(c.secondary_container), c.on_secondary_container, None)
+    } else {
+        (None, c.on_surface_variant, Some(c.outline))
+    };
+    let galley = ui.painter().layout_no_wrap(label.to_owned(), Role::LabelLarge.font(), content);
+    let check_space = if selected { 26.0 } else { 0.0 };
+    let width = 12.0 + check_space + galley.size().x + 12.0;
+    let (rect, response) = ui.allocate_exact_size(vec2(width, 32.0), Sense::click());
+
+    if ui.is_rect_visible(rect) {
+        let rounding = Rounding::same(shape::SMALL);
+        let painter = ui.painter();
+        if let Some(fill) = fill {
+            painter.rect_filled(rect, rounding, fill);
+        }
+        if let Some(line) = outline {
+            painter.rect_stroke(rect, rounding, Stroke::new(1.0, line));
+        }
+        state_layer(ui, rect, rounding, &response, content, true);
+        if selected {
+            icons::paint_check(painter, pos2(rect.left() + 12.0 + 9.0, rect.center().y), 18.0, content);
+        }
+        let text_pos = pos2(rect.left() + 12.0 + check_space, rect.center().y - galley.size().y / 2.0);
+        painter.galley(text_pos, galley, content);
+    }
+    pointer_cursor(response, true)
+}
+
+/// A single-select segmented button row. Returns the index that was clicked, if any.
+pub fn segmented(ui: &mut Ui, labels: &[&str], selected: usize) -> Option<usize> {
+    let c = theme::colors(ui);
+    let widest = labels
+        .iter()
+        .map(|label| {
+            ui.painter()
+                .layout_no_wrap((*label).to_owned(), Role::LabelLarge.font(), c.on_surface)
+                .size()
+                .x
+        })
+        .fold(0.0_f32, f32::max);
+    // Room for the check mark is reserved in every segment so selecting one never shifts the row.
+    let segment_width = widest + 24.0 + 26.0;
+    let mut clicked = None;
+    ui.horizontal(|ui| {
+        ui.spacing_mut().item_spacing.x = 0.0;
+        for (index, label) in labels.iter().enumerate() {
+            let is_selected = index == selected;
+            let (content, fill) = if is_selected {
+                (c.on_secondary_container, Some(c.secondary_container))
+            } else {
+                (c.on_surface, None)
+            };
+            let (rect, response) = ui.allocate_exact_size(vec2(segment_width, 40.0), Sense::click());
+            if ui.is_rect_visible(rect) {
+                let radius = 20.0;
+                let first = index == 0;
+                let last = index + 1 == labels.len();
+                let rounding = Rounding {
+                    nw: if first { radius } else { 0.0 },
+                    sw: if first { radius } else { 0.0 },
+                    ne: if last { radius } else { 0.0 },
+                    se: if last { radius } else { 0.0 },
+                };
+                let painter = ui.painter();
+                if let Some(fill) = fill {
+                    painter.rect_filled(rect, rounding, fill);
+                }
+                painter.rect_stroke(rect, rounding, Stroke::new(1.0, c.outline));
+                state_layer(ui, rect, rounding, &response, content, true);
+
+                let galley = painter.layout_no_wrap((*label).to_owned(), Role::LabelLarge.font(), content);
+                let group_width = galley.size().x + if is_selected { 26.0 } else { 0.0 };
+                let left = rect.center().x - group_width / 2.0;
+                if is_selected {
+                    icons::paint_check(painter, pos2(left + 9.0, rect.center().y), 18.0, content);
+                }
+                let text_x = left + if is_selected { 26.0 } else { 0.0 };
+                painter.galley(pos2(text_x, rect.center().y - galley.size().y / 2.0), galley, content);
+            }
+            if pointer_cursor(response, true).clicked() {
+                clicked = Some(index);
+            }
+        }
+    });
+    clicked
+}
+
+// ---- Cards ------------------------------------------------------------------------
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CardKind {
+    Filled,
+    Elevated,
+    Outlined,
+}
+
+/// A card that spans the available width. Elevation is expressed with tonal surface colours.
+pub fn card<R>(ui: &mut Ui, kind: CardKind, add_contents: impl FnOnce(&mut Ui) -> R) -> InnerResponse<R> {
+    let c = theme::colors(ui);
+    let (fill, stroke) = match kind {
+        CardKind::Filled => (c.surface_container_highest, Stroke::NONE),
+        CardKind::Elevated => (c.surface_container_low, Stroke::NONE),
+        CardKind::Outlined => (c.surface, Stroke::new(1.0, c.outline_variant)),
+    };
+    Frame::none()
+        .fill(fill)
+        .stroke(stroke)
+        .rounding(Rounding::same(shape::MEDIUM))
+        .inner_margin(Margin::same(16.0))
+        .show(ui, |ui| {
+            ui.set_width(ui.available_width());
+            add_contents(ui)
+        })
+}
+
+// ---- Text fields and search bar ---------------------------------------------------
+
+/// A filled text field.
+pub fn text_field(ui: &mut Ui, text: &mut String, hint: &str, width: f32) -> Response {
+    let c = theme::colors(ui);
+    ui.add(
+        egui::TextEdit::singleline(text)
+            .hint_text(egui::RichText::new(hint).color(c.on_surface_variant))
+            .desired_width(width)
+            .margin(Margin::symmetric(16.0, 12.0)),
+    )
+}
+
+#[derive(Debug, Default, Clone, Copy)]
+pub struct SearchBarResult {
+    /// Enter was pressed in the field.
+    pub submitted: bool,
+}
+
+/// A Material 3 search bar: 56dp tall, fully rounded, with a leading search icon button
+/// (which submits) and a clear button while there is text.
+pub fn search_bar(ui: &mut Ui, text: &mut String, hint: &str) -> SearchBarResult {
+    let c = theme::colors(ui);
+    let (rect, _) = ui.allocate_exact_size(vec2(ui.available_width(), 56.0), Sense::hover());
+    ui.painter().rect_filled(rect, shape::full(), c.surface_container_high);
+
+    let mut result = SearchBarResult::default();
+    let mut focused = false;
+    let inner = rect.shrink2(vec2(8.0, 0.0));
+    ui.allocate_new_ui(
+        UiBuilder::new().max_rect(inner).layout(Layout::left_to_right(Align::Center)),
+        |ui| {
+            // The leading icon doubles as the submit button.
+            if icon_button(ui, IconButtonKind::Standard, Icon::Search, false, "Search").clicked() {
+                result.submitted = true;
+            }
+
+            let clear_space = if text.is_empty() { 0.0 } else { 48.0 };
+            let edit_width = (ui.available_width() - clear_space).max(40.0);
+            let edit = ui.add(
+                egui::TextEdit::singleline(text)
+                    .frame(false)
+                    .font(Role::BodyLarge.font())
+                    .hint_text(egui::RichText::new(hint).color(c.on_surface_variant))
+                    .desired_width(edit_width)
+                    .margin(Margin::symmetric(8.0, 0.0)),
+            );
+            focused = edit.has_focus();
+            if edit.lost_focus() && ui.input(|input| input.key_pressed(egui::Key::Enter)) {
+                result.submitted = true;
+            }
+            if !text.is_empty()
+                && icon_button(ui, IconButtonKind::Standard, Icon::Close, false, "Clear").clicked()
+            {
+                text.clear();
+            }
+        },
+    );
+    if focused {
+        ui.painter().rect_stroke(rect, shape::full(), Stroke::new(2.0, c.primary));
+    }
+    result
+}
+
+// ---- Navigation -------------------------------------------------------------------
+
+fn nav_item(
+    ui: &mut Ui,
+    size: Vec2,
+    indicator_width: f32,
+    indicator_top: f32,
+    icon: Icon,
+    label: &str,
+    selected: bool,
+) -> Response {
+    let c = theme::colors(ui);
+    let (rect, response) = ui.allocate_exact_size(size, Sense::click());
+    let indicator = Rect::from_center_size(
+        pos2(rect.center().x, rect.top() + indicator_top + 16.0),
+        vec2(indicator_width, 32.0),
+    );
+    let rounding = shape::full();
+    let painter = ui.painter();
+    if selected {
+        painter.rect_filled(indicator, rounding, c.secondary_container);
+    }
+    state_layer(ui, indicator, rounding, &response, c.on_surface, true);
+
+    let icon_color = if selected { c.on_secondary_container } else { c.on_surface_variant };
+    icon.paint(painter, indicator.center(), 24.0, icon_color, selected);
+
+    let label_color = if selected { c.on_surface } else { c.on_surface_variant };
+    let galley = painter.layout_no_wrap(label.to_owned(), Role::LabelMedium.font(), label_color);
+    painter.galley(
+        pos2(rect.center().x - galley.size().x / 2.0, indicator.bottom() + 4.0),
+        galley,
+        label_color,
+    );
+    pointer_cursor(response, true)
+}
+
+/// A navigation rail destination: 80dp wide, icon in a 56x32 indicator with the label below.
+pub fn rail_destination(ui: &mut Ui, icon: Icon, label: &str, selected: bool) -> Response {
+    nav_item(ui, vec2(80.0, 64.0), 56.0, 4.0, icon, label, selected)
+}
+
+/// A navigation bar destination: `width` wide, 80dp tall, 64x32 indicator.
+pub fn bar_destination(ui: &mut Ui, width: f32, icon: Icon, label: &str, selected: bool) -> Response {
+    nav_item(ui, vec2(width, 80.0), 64.0, 12.0, icon, label, selected)
+}
+
+// ---- Seek slider ------------------------------------------------------------------
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum SeekEvent {
+    Idle,
+    /// The handle is being dragged; the value is the position it points at.
+    Dragging(f64),
+    /// The user released the handle (or clicked the track) at this position.
+    Committed(f64),
+}
+
+/// Maps a pointer x position to a value in `0..=max`.
+pub fn seek_value(x: f32, left: f32, right: f32, max: f64) -> f64 {
+    if right <= left {
+        return 0.0;
+    }
+    f64::from(((x - left) / (right - left)).clamp(0.0, 1.0)) * max
+}
+
+/// A Material 3 slider for seeking. Dragging only previews; the caller seeks on `Committed`.
+pub fn seek_bar(ui: &mut Ui, value: f64, max: f64, width: f32, enabled: bool) -> SeekEvent {
+    let c = theme::colors(ui);
+    let usable = enabled && max > 0.0;
+    let sense = if usable { Sense::click_and_drag() } else { Sense::hover() };
+    let (rect, response) = ui.allocate_exact_size(vec2(width, 32.0), sense);
+    let left = rect.left() + 10.0;
+    let right = rect.right() - 10.0;
+
+    let mut event = SeekEvent::Idle;
+    if usable {
+        let pointer_x = response
+            .interact_pointer_pos()
+            .or_else(|| ui.input(|input| input.pointer.latest_pos()))
+            .map(|pos| pos.x);
+        if let Some(x) = pointer_x {
+            let target = seek_value(x, left, right, max);
+            if response.drag_stopped() || response.clicked() {
+                event = SeekEvent::Committed(target);
+            } else if response.dragged() {
+                event = SeekEvent::Dragging(target);
+            }
+        }
+    }
+
+    if ui.is_rect_visible(rect) {
+        let shown = match event {
+            SeekEvent::Dragging(v) | SeekEvent::Committed(v) => v,
+            SeekEvent::Idle => value,
+        };
+        let fraction = if max > 0.0 { (shown / max).clamp(0.0, 1.0) as f32 } else { 0.0 };
+        let handle_x = left + fraction * (right - left);
+        let y = rect.center().y;
+        let painter = ui.painter();
+
+        let inactive = if usable { c.secondary_container } else { with_alpha(c.on_surface, state::DISABLED_CONTAINER) };
+        painter.rect_filled(Rect::from_min_max(pos2(left, y - 2.0), pos2(right, y + 2.0)), Rounding::same(2.0), inactive);
+        if usable {
+            painter.rect_filled(
+                Rect::from_min_max(pos2(left, y - 2.0), pos2(handle_x.max(left), y + 2.0)),
+                Rounding::same(2.0),
+                c.primary,
+            );
+            if response.hovered() || response.dragged() {
+                painter.circle_filled(pos2(handle_x, y), 16.0, with_alpha(c.primary, 0.12));
+            }
+            painter.circle_filled(pos2(handle_x, y), 10.0, c.primary);
+        }
+    }
+    if usable { response.on_hover_cursor(CursorIcon::PointingHand); }
+    event
+}
+
+// ---- Misc -------------------------------------------------------------------------
+
+/// A centred empty state: tonal icon badge, title and supporting text.
+pub fn empty_state(ui: &mut Ui, icon: Icon, title: &str, body: &str) {
+    let c = theme::colors(ui);
+    ui.vertical_centered(|ui| {
+        ui.add_space(40.0);
+        let (rect, _) = ui.allocate_exact_size(vec2(64.0, 64.0), Sense::hover());
+        ui.painter().circle_filled(rect.center(), 32.0, c.secondary_container);
+        icon.paint(ui.painter(), rect.center(), 32.0, c.on_secondary_container, false);
+        ui.add_space(16.0);
+        ui.label(theme::text(Role::TitleLarge, title).color(c.on_surface));
+        ui.add_space(4.0);
+        ui.label(theme::text(Role::BodyMedium, body).color(c.on_surface_variant));
+    });
+}
+
+/// A snackbar anchored to the bottom centre of `anchor` (the free content area).
+pub fn snackbar(ctx: &egui::Context, anchor: Rect, message: &str) {
+    let c = theme::colors_ctx(ctx);
+    egui::Area::new(egui::Id::new("m3-snackbar"))
+        .order(egui::Order::Foreground)
+        .pivot(Align2::CENTER_BOTTOM)
+        .fixed_pos(pos2(anchor.center().x, anchor.bottom() - 16.0))
+        .interactable(false)
+        .show(ctx, |ui| {
+            Frame::none()
+                .fill(c.inverse_surface)
+                .rounding(Rounding::same(shape::EXTRA_SMALL))
+                .inner_margin(Margin::symmetric(16.0, 14.0))
+                .show(ui, |ui| {
+                    ui.set_max_width((anchor.width() - 32.0).clamp(120.0, 560.0));
+                    ui.label(theme::text(Role::BodyMedium, message).color(c.inverse_on_surface));
+                });
+        });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn seek_value_maps_and_clamps() {
+        assert_eq!(seek_value(10.0, 10.0, 110.0, 200.0), 0.0);
+        assert_eq!(seek_value(60.0, 10.0, 110.0, 200.0), 100.0);
+        assert_eq!(seek_value(110.0, 10.0, 110.0, 200.0), 200.0);
+        assert_eq!(seek_value(-50.0, 10.0, 110.0, 200.0), 0.0);
+        assert_eq!(seek_value(500.0, 10.0, 110.0, 200.0), 200.0);
+        assert_eq!(seek_value(50.0, 10.0, 10.0, 200.0), 0.0);
+    }
+}
