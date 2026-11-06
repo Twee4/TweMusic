@@ -25,8 +25,8 @@ cargo run -p twe_music_tauri
 ```
 
 ```bash
-cargo run
 cargo test
+cargo run
 ```
 
 Install MPV and yt-dlp (MPV plays local files on its own; YouTube tracks also need yt-dlp):
