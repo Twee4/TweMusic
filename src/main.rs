@@ -28,6 +28,28 @@ fn format_seconds(seconds: f64) -> String {
     format!("{}:{:02}", total / 60, total % 60)
 }
 
+/// Paints album art into `rect`, centre-cropped to fill it, once the image has loaded.
+/// While it loads (or if it fails, e.g. offline) nothing is drawn, so the placeholder
+/// underneath stays visible and egui's warning glyph never appears.
+fn paint_album_art(ui: &egui::Ui, url: &str, rect: Rect) {
+    let image = egui::Image::from_uri(url).show_loading_spinner(false);
+    let Ok(egui::load::TexturePoll::Ready { texture }) = image.load_for_size(ui.ctx(), rect.size()) else {
+        return;
+    };
+    let aspect = if texture.size.y > 0.0 { texture.size.x / texture.size.y } else { 1.0 };
+    let (inset_x, inset_y) = if aspect > 1.0 {
+        ((1.0 - 1.0 / aspect) / 2.0, 0.0)
+    } else if aspect > 0.0 {
+        (0.0, (1.0 - aspect) / 2.0)
+    } else {
+        (0.0, 0.0)
+    };
+    image
+        .uv(Rect::from_min_max(pos2(inset_x, inset_y), pos2(1.0 - inset_x, 1.0 - inset_y)))
+        .rounding(Rounding::same(shape::SMALL))
+        .paint_at(ui, rect);
+}
+
 /// What the user asked for in a track row; applied after the row is drawn.
 enum RowAction {
     None,
@@ -72,6 +94,7 @@ impl TweMusicApp {
         theme::apply(&ctx);
         let theme_pref = theme::load_preference();
         ctx.set_theme(theme_pref);
+        egui_extras::install_image_loaders(&ctx);
 
         let (media_tx, media_rx) = mpsc::channel();
         let media = Media::new(media_tx, move || ctx.request_repaint());
@@ -404,6 +427,9 @@ impl TweMusicApp {
         let thumb = Rect::from_min_size(pos2(row.left() + 12.0, row.center().y - 24.0), vec2(48.0, 48.0));
         painter.rect_filled(thumb, Rounding::same(shape::SMALL), thumb_bg);
         Icon::Note.paint(&painter, thumb.center(), 24.0, thumb_fg, false);
+        if let Some(url) = track.thumbnail_url.as_deref() {
+            paint_album_art(ui, url, thumb);
+        }
 
         // Layout: [thumb] [title / artist ...] [duration] [play] [like] [more]
         let actions_width = if playable { 3.0 * 40.0 + 2.0 * 4.0 } else { 0.0 };
@@ -772,6 +798,11 @@ impl TweMusicApp {
         let can_prev = self.state.adjacent_remote(false).is_some();
         let can_next = self.state.adjacent_remote(true).is_some();
         let playing = self.state.playback == PlaybackStatus::Playing;
+        let art = self
+            .state
+            .current_track()
+            .filter(|_| self.mpv.is_some())
+            .and_then(|track| track.thumbnail_url.clone());
         let mut seek_event = SeekEvent::Idle;
 
         TopBottomPanel::bottom("player-panel")
@@ -788,6 +819,9 @@ impl TweMusicApp {
                             let (thumb, _) = ui.allocate_exact_size(vec2(48.0, 48.0), Sense::hover());
                             ui.painter().rect_filled(thumb, Rounding::same(shape::SMALL), c.primary_container);
                             Icon::Note.paint(ui.painter(), thumb.center(), 24.0, c.on_primary_container, false);
+                            if let Some(url) = &art {
+                                paint_album_art(ui, url, thumb);
+                            }
 
                             let text_width = (ui.available_width() - 12.0 - 40.0 - 48.0 - 40.0 - 24.0).max(60.0);
                             ui.allocate_ui_with_layout(vec2(text_width, 48.0), Layout::top_down(Align::Min), |ui| {
