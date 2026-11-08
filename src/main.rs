@@ -1,4 +1,4 @@
-use std::{fs, path::PathBuf, sync::mpsc::{self, Receiver, TryRecvError}, thread, time::{Duration, Instant}};
+use std::{fs, path::PathBuf, sync::mpsc::{self, Receiver, Sender, TryRecvError}, thread, time::{Duration, Instant}};
 
 use eframe::egui::{
     self, pos2, vec2, Align, CentralPanel, Context, Frame, Layout, Margin, Rect, Rounding, ScrollArea,
@@ -11,10 +11,13 @@ use twe_music::{
     library::{self, Library, SavedTrack},
     m3::{self, ButtonKind, CardKind, IconButtonKind, SeekEvent},
     media::Media,
+    notifications,
     models::{Screen, Track, TrackId},
     mpv::{self, MpvError, MpvPlayer},
+    settings::{self, Settings},
     state::{AppState, PlaybackStatus},
     theme::{self, shape, ColorScheme, Role, WindowSize},
+    tray::{TrayCommand, TrayHandle},
     ytmusic,
 };
 
@@ -87,6 +90,14 @@ struct TweMusicApp {
     media_synced: Option<(Option<TrackId>, PlaybackStatus)>,
     seek_drag: Option<f64>,
     theme_pref: ThemePreference,
+    settings: Settings,
+    settings_path: Option<PathBuf>,
+    tray: Option<TrayHandle>,
+    tray_tx: Sender<TrayCommand>,
+    tray_rx: Receiver<TrayCommand>,
+    tray_synced: Option<(Option<TrackId>, PlaybackStatus)>,
+    /// Set when the user really wants to quit (tray menu), so closing doesn't hide to the tray.
+    quit_requested: bool,
 }
 
 impl TweMusicApp {
@@ -100,7 +111,10 @@ impl TweMusicApp {
         let media = Media::new(media_tx, move || ctx.request_repaint());
         let library_path = library::default_path();
         let library = library_path.as_deref().map(Library::load_from).unwrap_or_else(Library::new);
-        Self {
+        let settings_path = settings::default_path();
+        let settings = settings_path.as_deref().map(Settings::load_from).unwrap_or_default();
+        let (tray_tx, tray_rx) = mpsc::channel();
+        let mut app = Self {
             state: AppState::new(), search_rx: None, search_in_flight: false,
             mpv: None, local_file_path: String::new(), player_message: None, snackbar: None,
             ytdlp_available: None, last_poll: Instant::now(), position: None, duration: None,
@@ -109,6 +123,87 @@ impl TweMusicApp {
             import_url: String::new(), import_rx: None,
             media, media_rx, media_synced: None, seek_drag: None,
             theme_pref,
+            settings, settings_path, tray: None, tray_tx, tray_rx, tray_synced: None, quit_requested: false,
+        };
+        if app.settings.tray {
+            app.start_tray(&ctx);
+        }
+        app
+    }
+
+    fn save_settings(&mut self) {
+        if let Some(path) = &self.settings_path {
+            if let Err(error) = self.settings.save_to(path) {
+                self.notify(format!("Could not save settings: {error}"));
+            }
+        }
+    }
+
+    /// Starts the tray icon. Returns false (and says why) if the desktop has no tray.
+    fn start_tray(&mut self, ctx: &Context) -> bool {
+        if self.tray.is_some() { return true; }
+        let wake_ctx = ctx.clone();
+        match TrayHandle::spawn(self.tray_tx.clone(), move || wake_ctx.request_repaint()) {
+            Ok(handle) => {
+                self.tray = Some(handle);
+                self.tray_synced = None;
+                true
+            }
+            Err(message) => {
+                self.notify(message);
+                false
+            }
+        }
+    }
+
+    fn stop_tray(&mut self) {
+        if let Some(handle) = self.tray.take() {
+            handle.shutdown();
+        }
+    }
+
+    fn show_window(ctx: &Context) {
+        ctx.send_viewport_cmd(egui::ViewportCommand::Minimized(false));
+        ctx.send_viewport_cmd(egui::ViewportCommand::Visible(true));
+        ctx.send_viewport_cmd(egui::ViewportCommand::Focus);
+    }
+
+    /// Handles clicks on the tray icon and its menu.
+    fn poll_tray(&mut self, ctx: &Context) {
+        while let Ok(command) = self.tray_rx.try_recv() {
+            match command {
+                TrayCommand::Show => Self::show_window(ctx),
+                TrayCommand::PlayPause => self.toggle_local_playback(),
+                TrayCommand::Next => self.skip(true),
+                TrayCommand::Previous => self.skip(false),
+                TrayCommand::Quit => {
+                    self.quit_requested = true;
+                    ctx.send_viewport_cmd(egui::ViewportCommand::Close);
+                }
+            }
+        }
+    }
+
+    /// Keeps the tray's play/pause label and tooltip in step with playback.
+    fn sync_tray(&mut self) {
+        let Some(tray) = self.tray.as_ref() else { return; };
+        let key = (self.state.current_track, self.state.playback);
+        if self.tray_synced == Some(key) { return; }
+        self.tray_synced = Some(key);
+        let name = self
+            .state
+            .current_track()
+            .map(|track| format!("{} - {}", track.title, track.artist))
+            .unwrap_or_default();
+        tray.update(self.state.playback == PlaybackStatus::Playing, &name);
+    }
+
+    /// With the tray on, closing the window minimises it so the music keeps playing.
+    /// (Minimised rather than hidden: that works the same on X11 and Wayland.)
+    fn handle_close(&mut self, ctx: &Context) {
+        if self.tray.is_some() && !self.quit_requested && ctx.input(|input| input.viewport().close_requested()) {
+            ctx.send_viewport_cmd(egui::ViewportCommand::CancelClose);
+            ctx.send_viewport_cmd(egui::ViewportCommand::Minimized(true));
         }
     }
 
@@ -269,7 +364,15 @@ impl TweMusicApp {
         self.position = position;
         self.duration = duration;
         if position.is_some_and(|value| value > 0.0) {
-            if !self.played_something { self.player_message = None; }
+            if !self.played_something {
+                self.player_message = None;
+                let in_background = ctx.input(|input| input.viewport().focused) == Some(false);
+                if self.settings.notifications && in_background {
+                    if let Some(track) = self.state.current_track() {
+                        notifications::show_track(track);
+                    }
+                }
+            }
             self.played_something = true;
             self.loading_since = None;
         }
@@ -658,6 +761,20 @@ impl TweMusicApp {
         });
     }
 
+    /// A settings row: title and description on the left, a switch on the right.
+    /// Returns true when the switch was toggled.
+    fn switch_row(ui: &mut egui::Ui, c: &ColorScheme, title: &str, description: &str, on: &mut bool) -> bool {
+        let mut changed = false;
+        ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+            changed = m3::switch(ui, on).changed();
+            ui.with_layout(Layout::top_down(Align::Min), |ui| {
+                ui.label(theme::text(Role::BodyLarge, title).color(c.on_surface));
+                ui.label(theme::text(Role::BodyMedium, description).color(c.on_surface_variant));
+            });
+        });
+        changed
+    }
+
     fn render_settings(&mut self, ui: &mut egui::Ui, ctx: &Context) {
         let c = theme::colors(ui);
         Self::page_title(ui, "Settings", "Manage appearance and playback.");
@@ -679,6 +796,34 @@ impl TweMusicApp {
                     };
                     ctx.set_theme(self.theme_pref);
                     theme::save_preference(self.theme_pref);
+                }
+            });
+            ui.add_space(12.0);
+            m3::card(ui, CardKind::Filled, |ui| {
+                ui.label(theme::text(Role::TitleMedium, "Background and notifications").color(c.on_surface));
+                ui.add_space(8.0);
+                let mut notifications_on = self.settings.notifications;
+                let mut tray_on = self.tray.is_some();
+                let mut changed = Self::switch_row(
+                    ui, c, "Track notifications",
+                    "Show the song when a new one starts while TweMusic is in the background.",
+                    &mut notifications_on,
+                );
+                ui.add_space(12.0);
+                changed |= Self::switch_row(
+                    ui, c, "Keep playing in the tray",
+                    "Closing the window minimises it and shows a tray icon with controls. Quit from the tray menu.",
+                    &mut tray_on,
+                );
+                if changed {
+                    self.settings.notifications = notifications_on;
+                    if tray_on {
+                        self.settings.tray = self.start_tray(ctx);
+                    } else {
+                        self.stop_tray();
+                        self.settings.tray = false;
+                    }
+                    self.save_settings();
                 }
             });
             ui.add_space(12.0);
@@ -876,6 +1021,8 @@ impl eframe::App for TweMusicApp {
     fn update(&mut self, ctx: &Context, _frame: &mut eframe::Frame) {
         self.poll_search();
         self.poll_media();
+        self.poll_tray(ctx);
+        self.handle_close(ctx);
         self.poll_import();
         self.tick_player(ctx);
 
@@ -911,6 +1058,7 @@ impl eframe::App for TweMusicApp {
         }
 
         self.sync_media();
+        self.sync_tray();
     }
 }
 
