@@ -20,6 +20,9 @@ pub struct SavedTrack {
     pub artist: String,
     pub album: Option<String>,
     pub duration_secs: u64,
+    /// Added later; older library files don't have it.
+    #[serde(default)]
+    pub thumbnail_url: Option<String>,
 }
 
 impl SavedTrack {
@@ -31,6 +34,10 @@ impl SavedTrack {
             artist: track.artist.clone(),
             album: track.album.clone(),
             duration_secs: track.duration.as_secs(),
+            thumbnail_url: track
+                .thumbnail_url
+                .clone()
+                .filter(|url| crate::ytmusic::is_allowed_thumbnail_url(url)),
         })
     }
 
@@ -42,6 +49,11 @@ impl SavedTrack {
             album: self.album.clone(),
             duration: Duration::from_secs(self.duration_secs),
             video_id: Some(self.video_id.clone()),
+            // Re-checked on load, since the library file can be edited by hand.
+            thumbnail_url: self
+                .thumbnail_url
+                .clone()
+                .filter(|url| crate::ytmusic::is_allowed_thumbnail_url(url)),
         }
     }
 }
@@ -191,7 +203,23 @@ mod tests {
             album: Some("Album".to_owned()),
             duration: Duration::from_secs(61),
             video_id: Some(video_id.to_owned()),
+            thumbnail_url: None,
         }
+    }
+
+    #[test]
+    fn thumbnails_round_trip_and_old_files_still_load() {
+        let mut track = sample("aaaaaaaaaaa");
+        track.thumbnail_url = Some("https://i.ytimg.com/vi/aaaaaaaaaaa/hq720.jpg".to_owned());
+        let saved = SavedTrack::from_track(&track).unwrap();
+        assert_eq!(saved.to_track().thumbnail_url, track.thumbnail_url);
+
+        track.thumbnail_url = Some("https://evil.example/x.png".to_owned());
+        assert_eq!(SavedTrack::from_track(&track).unwrap().thumbnail_url, None);
+
+        let old = r#"{ "video_id": "aaaaaaaaaaa", "title": "T", "artist": "A", "album": null, "duration_secs": 5 }"#;
+        let loaded: SavedTrack = serde_json::from_str(old).unwrap();
+        assert_eq!(loaded.thumbnail_url, None);
     }
 
     #[test]
