@@ -119,6 +119,7 @@ fn parse_video_renderer(renderer: &Value, seen: &mut HashSet<String>) -> Option<
         album: None,
         duration,
         video_id: Some(video_id.to_owned()),
+        thumbnail_url: renderer.pointer("/thumbnail/thumbnails").and_then(best_thumbnail),
     })
 }
 
@@ -181,7 +182,54 @@ fn parse_music_item(renderer: &Value, seen: &mut HashSet<String>) -> Option<Trac
         album,
         duration,
         video_id: Some(video_id.to_owned()),
+        thumbnail_url: renderer
+            .pointer("/thumbnail/musicThumbnailRenderer/thumbnail/thumbnails")
+            .and_then(best_thumbnail),
     })
+}
+
+/// Image hosts TweMusic is willing to fetch album art from.
+const THUMBNAIL_HOSTS: [&str; 3] = ["ytimg.com", "googleusercontent.com", "ggpht.com"];
+
+/// True for https URLs on YouTube's own image hosts. Anything else is never fetched.
+pub fn is_allowed_thumbnail_url(url: &str) -> bool {
+    if url.len() > 2048 {
+        return false;
+    }
+    let Some(rest) = url.strip_prefix("https://") else { return false; };
+    let authority = rest.split(|c| c == '/' || c == '?' || c == '#').next().unwrap_or_default();
+    if authority.is_empty() || authority.contains('@') || authority.contains(':') {
+        return false;
+    }
+    let host = authority.to_ascii_lowercase();
+    THUMBNAIL_HOSTS
+        .iter()
+        .any(|allowed| host == *allowed || host.ends_with(&format!(".{allowed}")))
+}
+
+/// Asks Google's image servers for a size that stays sharp at 48dp on HiDPI screens.
+fn upscale_thumbnail(url: &str) -> String {
+    const SIZED: &str = "=w226-h226-l90-rj";
+    let is_google_image = url.contains("googleusercontent.com/") || url.contains("ggpht.com/");
+    if let (true, Some(index)) = (is_google_image, url.rfind('=')) {
+        let suffix = &url[index + 1..];
+        let looks_sized = suffix.starts_with('w') && suffix[1..].starts_with(|c: char| c.is_ascii_digit());
+        if looks_sized {
+            return format!("{}{}", &url[..index], SIZED);
+        }
+    }
+    url.to_owned()
+}
+
+/// The largest allowed thumbnail in a `thumbnails` array (YouTube lists smallest first).
+pub(crate) fn best_thumbnail(thumbnails: &Value) -> Option<String> {
+    thumbnails
+        .as_array()?
+        .iter()
+        .rev()
+        .filter_map(|item| item.get("url").and_then(Value::as_str))
+        .find(|url| is_allowed_thumbnail_url(url))
+        .map(upscale_thumbnail)
 }
 
 fn text_field(value: &Value) -> Option<String> {
@@ -257,6 +305,36 @@ mod tests {
         assert_eq!(tracks[0].album.as_deref(), Some("Example Album"));
         assert_eq!(tracks[0].duration.as_secs(), 222);
         assert_eq!(tracks[0].video_id.as_deref(), Some("abc123_XYZ0"));
+    }
+
+    #[test]
+    fn thumbnail_urls_are_limited_to_youtube_image_hosts() {
+        assert!(is_allowed_thumbnail_url("https://i.ytimg.com/vi/abc/hq720.jpg"));
+        assert!(is_allowed_thumbnail_url("https://lh3.googleusercontent.com/abc=w60-h60-l90-rj"));
+        assert!(!is_allowed_thumbnail_url("http://i.ytimg.com/vi/abc/hq720.jpg"));
+        assert!(!is_allowed_thumbnail_url("https://evil.example/ytimg.com/x.jpg"));
+        assert!(!is_allowed_thumbnail_url("https://ytimg.com.evil.example/x.jpg"));
+        assert!(!is_allowed_thumbnail_url("https://user@i.ytimg.com/x.jpg"));
+        assert!(!is_allowed_thumbnail_url("https://i.ytimg.com:8080/x.jpg"));
+        assert!(!is_allowed_thumbnail_url("file:///etc/passwd"));
+    }
+
+    #[test]
+    fn best_thumbnail_prefers_the_largest_allowed_and_resizes_google_images() {
+        let thumbnails = json!([
+            { "url": "https://lh3.googleusercontent.com/abc=w60-h60-l90-rj", "width": 60, "height": 60 },
+            { "url": "https://lh3.googleusercontent.com/abc=w120-h120-l90-rj", "width": 120, "height": 120 },
+            { "url": "https://tracker.example/pixel.png", "width": 500, "height": 500 }
+        ]);
+        assert_eq!(
+            best_thumbnail(&thumbnails).as_deref(),
+            Some("https://lh3.googleusercontent.com/abc=w226-h226-l90-rj")
+        );
+        assert_eq!(best_thumbnail(&json!([{ "url": "https://tracker.example/x.png" }])), None);
+        assert_eq!(best_thumbnail(&json!("nope")), None);
+        // Video thumbnails on ytimg.com are used as they are.
+        let video = json!([{ "url": "https://i.ytimg.com/vi/abc/hq720.jpg?sqp=x" }]);
+        assert_eq!(best_thumbnail(&video).as_deref(), Some("https://i.ytimg.com/vi/abc/hq720.jpg?sqp=x"));
     }
 
     #[test]

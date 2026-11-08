@@ -507,3 +507,32 @@ mod tests {
         assert_eq!(seek_value(50.0, 10.0, 10.0, 200.0), 0.0);
     }
 }
+
+/// A Material 3 switch (52x32 track, thumb grows when pressed). Returns the response;
+/// `*on` is flipped when it is clicked.
+pub fn switch(ui: &mut Ui, on: &mut bool) -> Response {
+    let c = theme::colors(ui);
+    let (rect, mut response) = ui.allocate_exact_size(vec2(52.0, 32.0), Sense::click());
+    if response.clicked() {
+        *on = !*on;
+        response.mark_changed();
+    }
+    if ui.is_rect_visible(rect) {
+        let t = ui.ctx().animate_bool(response.id, *on);
+        let lerp = |a: Color32, b: Color32| theme::blend(a, b, t);
+        let track = lerp(c.surface_container_highest, c.primary);
+        let handle = lerp(c.outline, c.on_primary);
+        let radius = if response.is_pointer_button_down_on() { 14.0 } else { 8.0 + 4.0 * t };
+        let center = pos2(rect.left() + 16.0 + 20.0 * t, rect.center().y);
+        let painter = ui.painter();
+        painter.rect_filled(rect, Rounding::same(16.0), track);
+        if t < 1.0 {
+            painter.rect_stroke(rect.shrink(1.0), Rounding::same(15.0), Stroke::new(2.0 * (1.0 - t), c.outline));
+        }
+        if response.hovered() || response.has_focus() {
+            painter.circle_filled(center, 20.0, theme::with_alpha(handle, theme::state::HOVER));
+        }
+        painter.circle_filled(center, radius, handle);
+    }
+    pointer_cursor(response, true)
+}

@@ -69,6 +69,7 @@ pub fn parse_playlist_json(text: &str) -> Result<(String, Vec<Track>), String> {
             album: None,
             duration: Duration::from_secs(seconds),
             video_id: Some(id.to_owned()),
+            thumbnail_url: entry.get("thumbnails").and_then(crate::ytmusic::best_thumbnail),
         });
     }
     if tracks.is_empty() {
@@ -95,7 +96,8 @@ mod tests {
         let json = r#"{
             "title": "My Mix",
             "entries": [
-                { "id": "abc123_XYZ0", "title": "One", "uploader": "Band", "duration": 200.0 },
+                { "id": "abc123_XYZ0", "title": "One", "uploader": "Band", "duration": 200.0,
+                  "thumbnails": [ { "url": "https://i.ytimg.com/vi/abc123_XYZ0/default.jpg" }, { "url": "https://i.ytimg.com/vi/abc123_XYZ0/hqdefault.jpg" } ] },
                 { "id": "abc123_XYZ0", "title": "Duplicate" },
                 { "id": "bad id", "title": "Rejected" },
                 { "id": "def456-UVW1", "title": "Two", "channel": "Other", "duration": 95 }
@@ -106,6 +108,8 @@ mod tests {
         assert_eq!(tracks.len(), 2);
         assert_eq!(tracks[0].artist, "Band");
         assert_eq!(tracks[0].duration.as_secs(), 200);
+        assert_eq!(tracks[0].thumbnail_url.as_deref(), Some("https://i.ytimg.com/vi/abc123_XYZ0/hqdefault.jpg"));
+        assert_eq!(tracks[1].thumbnail_url, None);
         assert_eq!(tracks[1].artist, "Other");
         assert!(parse_playlist_json(r#"{ "title": "x" }"#).is_err());
     }

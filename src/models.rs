@@ -20,6 +20,8 @@ pub struct Track {
     pub duration: Duration,
     /// Present for remote YouTube Music search results; demo/local tracks have none.
     pub video_id: Option<String>,
+    /// Album art or video thumbnail, only ever a https URL on YouTube's own image hosts.
+    pub thumbnail_url: Option<String>,
 }
 
 impl Track {
@@ -31,6 +33,7 @@ impl Track {
             album: album.map(str::to_owned),
             duration: Duration::from_secs(seconds),
             video_id: None,
+            thumbnail_url: None,
         }
     }
 
