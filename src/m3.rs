@@ -88,7 +88,7 @@ pub fn button_enabled(ui: &mut Ui, kind: ButtonKind, label: &str, enabled: bool)
             painter.rect_filled(rect, rounding, fill);
         }
         if let Some(line) = outline {
-            painter.rect_stroke(rect, rounding, Stroke::new(1.0, line));
+            painter.rect_stroke(rect, rounding, Stroke::new(1.0_f32, line));
         }
         state_layer(ui, rect, rounding, &response, content, enabled);
         painter.galley(rect.center() - galley.size() / 2.0, galley, content);
@@ -174,7 +174,7 @@ pub fn filter_chip(ui: &mut Ui, label: &str, selected: bool) -> Response {
             painter.rect_filled(rect, rounding, fill);
         }
         if let Some(line) = outline {
-            painter.rect_stroke(rect, rounding, Stroke::new(1.0, line));
+            painter.rect_stroke(rect, rounding, Stroke::new(1.0_f32, line));
         }
         state_layer(ui, rect, rounding, &response, content, true);
         if selected {
@@ -225,7 +225,7 @@ pub fn segmented(ui: &mut Ui, labels: &[&str], selected: usize) -> Option<usize>
                 if let Some(fill) = fill {
                     painter.rect_filled(rect, rounding, fill);
                 }
-                painter.rect_stroke(rect, rounding, Stroke::new(1.0, c.outline));
+                painter.rect_stroke(rect, rounding, Stroke::new(1.0_f32, c.outline));
                 state_layer(ui, rect, rounding, &response, content, true);
 
                 let galley = painter.layout_no_wrap((*label).to_owned(), Role::LabelLarge.font(), content);
@@ -260,7 +260,7 @@ pub fn card<R>(ui: &mut Ui, kind: CardKind, add_contents: impl FnOnce(&mut Ui) -
     let (fill, stroke) = match kind {
         CardKind::Filled => (c.surface_container_highest, Stroke::NONE),
         CardKind::Elevated => (c.surface_container_low, Stroke::NONE),
-        CardKind::Outlined => (c.surface, Stroke::new(1.0, c.outline_variant)),
+        CardKind::Outlined => (c.surface, Stroke::new(1.0_f32, c.outline_variant)),
     };
     Frame::none()
         .fill(fill)
@@ -332,7 +332,7 @@ pub fn search_bar(ui: &mut Ui, text: &mut String, hint: &str) -> SearchBarResult
         },
     );
     if focused {
-        ui.painter().rect_stroke(rect, shape::full(), Stroke::new(2.0, c.primary));
+        ui.painter().rect_stroke(rect, shape::full(), Stroke::new(2.0_f32, c.primary));
     }
     result
 }

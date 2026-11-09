@@ -290,21 +290,21 @@ fn visuals(c: &ColorScheme, dark: bool) -> Visuals {
     v.error_fg_color = c.error;
     v.slider_trailing_fill = true;
     v.selection.bg_fill = c.primary_container;
-    v.selection.stroke = Stroke::new(1.0, c.primary);
-    v.text_cursor.stroke = Stroke::new(2.0, c.primary);
+    v.selection.stroke = Stroke::new(1.0_f32, c.primary);
+    v.text_cursor.stroke = Stroke::new(2.0_f32, c.primary);
 
     // Text and frames.
     v.widgets.noninteractive.bg_fill = c.surface;
     v.widgets.noninteractive.weak_bg_fill = c.surface;
-    v.widgets.noninteractive.bg_stroke = Stroke::new(1.0, c.outline_variant);
-    v.widgets.noninteractive.fg_stroke = Stroke::new(1.0, c.on_surface);
+    v.widgets.noninteractive.bg_stroke = Stroke::new(1.0_f32, c.outline_variant);
+    v.widgets.noninteractive.fg_stroke = Stroke::new(1.0_f32, c.on_surface);
     v.widgets.noninteractive.rounding = corner;
 
     // Buttons and fields at rest: transparent, with the Material state layers on top.
     v.widgets.inactive.bg_fill = c.surface_container_highest;
     v.widgets.inactive.weak_bg_fill = Color32::TRANSPARENT;
     v.widgets.inactive.bg_stroke = Stroke::NONE;
-    v.widgets.inactive.fg_stroke = Stroke::new(1.0, c.on_surface);
+    v.widgets.inactive.fg_stroke = Stroke::new(1.0_f32, c.on_surface);
     v.widgets.inactive.rounding = corner;
     v.widgets.inactive.expansion = 0.0;
 
@@ -312,7 +312,7 @@ fn visuals(c: &ColorScheme, dark: bool) -> Visuals {
     v.widgets.hovered.bg_fill = blend(c.surface_container_highest, c.on_surface, state::HOVER);
     v.widgets.hovered.weak_bg_fill = hover_weak;
     v.widgets.hovered.bg_stroke = Stroke::NONE;
-    v.widgets.hovered.fg_stroke = Stroke::new(1.0, c.on_surface);
+    v.widgets.hovered.fg_stroke = Stroke::new(1.0_f32, c.on_surface);
     v.widgets.hovered.rounding = corner;
     v.widgets.hovered.expansion = 0.0;
 
@@ -320,7 +320,7 @@ fn visuals(c: &ColorScheme, dark: bool) -> Visuals {
     v.widgets.active.bg_fill = blend(c.surface_container_highest, c.on_surface, state::PRESSED);
     v.widgets.active.weak_bg_fill = pressed_weak;
     v.widgets.active.bg_stroke = Stroke::NONE;
-    v.widgets.active.fg_stroke = Stroke::new(1.0, c.on_surface);
+    v.widgets.active.fg_stroke = Stroke::new(1.0_f32, c.on_surface);
     v.widgets.active.rounding = corner;
     v.widgets.active.expansion = 0.0;
 
