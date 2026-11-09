@@ -98,6 +98,8 @@ struct TweMusicApp {
     tray_synced: Option<(Option<TrackId>, PlaybackStatus)>,
     /// Set when the user really wants to quit (tray menu), so closing doesn't hide to the tray.
     quit_requested: bool,
+    notice_tx: Sender<String>,
+    notice_rx: Receiver<String>,
 }
 
 impl TweMusicApp {
@@ -115,6 +117,7 @@ impl TweMusicApp {
         let settings_path = settings::default_path();
         let settings = settings_path.as_deref().map(Settings::load_from).unwrap_or_default();
         let (tray_tx, tray_rx) = mpsc::channel();
+        let (notice_tx, notice_rx) = mpsc::channel();
         let mut app = Self {
             state: AppState::new(), search_rx: None, search_in_flight: false,
             mpv: None, local_file_path: String::new(), player_message: None, snackbar: None,
@@ -125,6 +128,7 @@ impl TweMusicApp {
             media, media_rx, media_synced: None, seek_drag: None,
             theme_pref,
             settings, settings_path, tray: None, tray_tx, tray_rx, tray_synced: None, quit_requested: false,
+            notice_tx, notice_rx,
         };
         if app.settings.tray {
             app.start_tray(&ctx);
@@ -177,6 +181,9 @@ impl TweMusicApp {
 
     /// Handles clicks on the tray icon and its menu.
     fn poll_tray(&mut self, ctx: &Context) {
+        while let Ok(message) = self.notice_rx.try_recv() {
+            self.notify(message);
+        }
         while let Ok(command) = self.tray_rx.try_recv() {
             match command {
                 TrayCommand::Show => Self::show_window(ctx),
@@ -820,9 +827,19 @@ impl TweMusicApp {
                     &mut tray_on,
                 );
                 ui.add_space(12.0);
-                if m3::button(ui, ButtonKind::Tonal, "Quit TweMusic").clicked() {
-                    self.quit(ctx);
-                }
+                ui.horizontal(|ui| {
+                    if m3::button(ui, ButtonKind::Outlined, "Send test notification").clicked() {
+                        let tx = self.notice_tx.clone();
+                        let wake = ctx.clone();
+                        notifications::send_test(move |error| {
+                            let _ = tx.send(error.unwrap_or_else(|| "Test notification sent.".to_owned()));
+                            wake.request_repaint();
+                        });
+                    }
+                    if m3::button(ui, ButtonKind::Tonal, "Quit TweMusic").clicked() {
+                        self.quit(ctx);
+                    }
+                });
                 if changed {
                     self.settings.notifications = notifications_on;
                     if tray_on {
