@@ -163,6 +163,12 @@ impl TweMusicApp {
         }
     }
 
+    /// Really quits (stops playback and exits), even when the tray keeps the app alive on close.
+    fn quit(&mut self, ctx: &Context) {
+        self.quit_requested = true;
+        ctx.send_viewport_cmd(egui::ViewportCommand::Close);
+    }
+
     fn show_window(ctx: &Context) {
         ctx.send_viewport_cmd(egui::ViewportCommand::Minimized(false));
         ctx.send_viewport_cmd(egui::ViewportCommand::Visible(true));
@@ -177,10 +183,7 @@ impl TweMusicApp {
                 TrayCommand::PlayPause => self.toggle_local_playback(),
                 TrayCommand::Next => self.skip(true),
                 TrayCommand::Previous => self.skip(false),
-                TrayCommand::Quit => {
-                    self.quit_requested = true;
-                    ctx.send_viewport_cmd(egui::ViewportCommand::Close);
-                }
+                TrayCommand::Quit => self.quit(ctx),
             }
         }
     }
@@ -816,6 +819,10 @@ impl TweMusicApp {
                     "Closing the window minimises it and shows a tray icon with controls. Quit from the tray menu.",
                     &mut tray_on,
                 );
+                ui.add_space(12.0);
+                if m3::button(ui, ButtonKind::Tonal, "Quit TweMusic").clicked() {
+                    self.quit(ctx);
+                }
                 if changed {
                     self.settings.notifications = notifications_on;
                     if tray_on {
@@ -870,6 +877,9 @@ impl TweMusicApp {
                     ui.add_space(8.0);
                     ui.label(theme::text(Role::TitleLarge, title).color(c.on_surface));
                     ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                        if m3::icon_button(ui, IconButtonKind::Standard, Icon::Power, false, "Quit TweMusic").clicked() {
+                            self.quit(ctx);
+                        }
                         let mode = match self.theme_pref {
                             ThemePreference::System => "system",
                             ThemePreference::Light => "light",
