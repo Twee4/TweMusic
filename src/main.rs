@@ -108,7 +108,8 @@ impl TweMusicApp {
         egui_extras::install_image_loaders(&ctx);
 
         let (media_tx, media_rx) = mpsc::channel();
-        let media = Media::new(media_tx, move || ctx.request_repaint());
+        let repaint_ctx = ctx.clone();
+        let media = Media::new(media_tx, move || repaint_ctx.request_repaint());
         let library_path = library::default_path();
         let library = library_path.as_deref().map(Library::load_from).unwrap_or_else(Library::new);
         let settings_path = settings::default_path();
