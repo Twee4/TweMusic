@@ -21,6 +21,7 @@ pub enum Icon {
     Close,
     Contrast,
     Note,
+    Power,
 }
 
 impl Icon {
@@ -111,6 +112,17 @@ impl Icon {
             Self::Close => {
                 painter.line_segment([at(6.0, 6.0), at(18.0, 18.0)], stroke);
                 painter.line_segment([at(18.0, 6.0), at(6.0, 18.0)], stroke);
+            }
+            Self::Power => {
+                // An arc open at the top, with a vertical bar through the gap.
+                let arc: Vec<Pos2> = (0..=22)
+                    .map(|step| {
+                        let angle = -PI / 2.0 + PI / 5.0 + step as f32 / 22.0 * (2.0 * PI - 2.0 * PI / 5.0);
+                        at(12.0 + 8.0 * angle.cos(), 13.0 + 8.0 * angle.sin())
+                    })
+                    .collect();
+                painter.add(Shape::line(arc, stroke));
+                painter.line_segment([at(12.0, 3.0), at(12.0, 11.5)], stroke);
             }
             Self::Contrast => {
                 painter.circle_stroke(at(12.0, 12.0), 8.0 * unit, stroke);
