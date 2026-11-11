@@ -24,10 +24,22 @@ pub fn post_player(
     body: &Value,
     visitor_data: Option<&str>,
 ) -> Result<Value, InnerTubeError> {
+    post(http, client, "player", body, visitor_data)
+}
+
+/// Posts to an InnerTube endpoint (`player`, `search` or `browse`) as `client`.
+pub fn post(
+    http: &reqwest::blocking::Client,
+    client: &ClientProfile,
+    endpoint: &str,
+    body: &Value,
+    visitor_data: Option<&str>,
+) -> Result<Value, InnerTubeError> {
+    debug_assert!(["player", "search", "browse"].contains(&endpoint));
     // The host was validated against YouTube's own hosts when the profile was loaded.
     let origin = format!("https://{}", client.host);
     let mut request = http
-        .post(format!("{origin}/youtubei/v1/player?prettyPrint=false"))
+        .post(format!("{origin}/youtubei/v1/{endpoint}?prettyPrint=false"))
         .header("User-Agent", client.user_agent.as_str())
         .header("X-Goog-Api-Format-Version", "1")
         .header("X-YouTube-Client-Name", client.id())

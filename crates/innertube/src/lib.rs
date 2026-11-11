@@ -1,9 +1,13 @@
 //! InnerTube access for TweMusic: client identities, the HTTP transport, stream lookup and
 //! small identifier helpers. It has no UI and no audio code, so it can be tested on its own.
 
+pub mod browse;
 pub mod clients;
 pub mod ids;
+pub mod models;
+pub mod parse;
 pub mod player;
+pub mod search;
 pub mod transport;
 
 use thiserror::Error;
