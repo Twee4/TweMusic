@@ -13,9 +13,10 @@ use twe_music::{
     media::Media,
     notifications,
     models::{Screen, Track, TrackId},
-    mpv::{self, MpvError, MpvPlayer},
+    mpv::{MpvError, MpvPlayer},
     settings::{self, Settings},
     state::{AppState, PlaybackStatus},
+    stream::{self, Stream},
     theme::{self, shape, ColorScheme, Role, WindowSize},
     tray::{TrayCommand, TrayHandle},
     ytmusic,
@@ -73,7 +74,11 @@ struct TweMusicApp {
     player_message: Option<String>,
     /// Feedback for user actions and errors, shown as a snackbar.
     snackbar: Option<(String, Instant)>,
-    ytdlp_available: Option<bool>,
+    /// The page's `egui::Context`, used to wake the UI from worker threads.
+    ctx: Context,
+    stream_rx: Option<Receiver<Result<Stream, String>>>,
+    /// The track whose stream is being resolved.
+    pending_track: Option<Track>,
     last_poll: Instant,
     position: Option<f64>,
     duration: Option<f64>,
@@ -121,7 +126,7 @@ impl TweMusicApp {
         let mut app = Self {
             state: AppState::new(), search_rx: None, search_in_flight: false,
             mpv: None, local_file_path: String::new(), player_message: None, snackbar: None,
-            ytdlp_available: None, last_poll: Instant::now(), position: None, duration: None,
+            ctx: ctx.clone(), stream_rx: None, pending_track: None, last_poll: Instant::now(), position: None, duration: None,
             played_something: false, loading_since: None,
             library, library_path, selected_playlist: 0, new_playlist_name: String::new(),
             import_url: String::new(), import_rx: None,
@@ -325,18 +330,45 @@ impl TweMusicApp {
         Ok(self.mpv.as_mut().expect("player was just started"))
     }
 
-    /// Streams a YouTube Music track's audio through MPV (which resolves it with yt-dlp).
+    /// Starts playing a YouTube Music track: its stream is resolved on a worker thread,
+    /// then handed to MPV by `poll_stream`.
     fn play_remote(&mut self, track: &Track) {
-        let Some(url) = track.video_id.as_deref().and_then(ytmusic::youtube_music_url) else {
+        let Some(video_id) = track.video_id.clone().filter(|id| ytmusic::youtube_music_url(id).is_some()) else {
             self.notify("YouTube returned an invalid video ID.".to_owned());
             return;
         };
-        if !*self.ytdlp_available.get_or_insert_with(mpv::ytdlp_available) {
-            self.ytdlp_available = None; // check again next time, in case it was just installed
-            self.notify("yt-dlp is required to play YouTube tracks. Install it (for example `pipx install yt-dlp`) and try again.".to_owned());
-            return;
+        let (tx, rx) = mpsc::channel();
+        let wake = self.ctx.clone();
+        thread::spawn(move || {
+            let _ = tx.send(stream::resolve(&video_id));
+            wake.request_repaint();
+        });
+        // Replacing the receiver drops any older request; its result is simply ignored.
+        self.stream_rx = Some(rx);
+        self.pending_track = Some(track.clone());
+        self.player_message = Some(format!("Loading {}…", track.title));
+    }
+
+    fn poll_stream(&mut self) {
+        let Some(rx) = &self.stream_rx else { return; };
+        let result = match rx.try_recv() {
+            Ok(result) => result,
+            Err(TryRecvError::Empty) => return,
+            Err(TryRecvError::Disconnected) => Err("Could not look up the stream.".to_owned()),
+        };
+        self.stream_rx = None;
+        let Some(track) = self.pending_track.take() else { return; };
+        match result {
+            Ok(stream) => self.start_stream(&track, &stream),
+            Err(message) => {
+                self.player_message = None;
+                self.notify(message);
+            }
         }
-        let result = self.ensure_player().and_then(|player| player.load_url(&url));
+    }
+
+    fn start_stream(&mut self, track: &Track, stream: &Stream) {
+        let result = self.ensure_player().and_then(|player| player.load_stream(stream));
         match result {
             Ok(()) => {
                 if !self.state.tracks.iter().any(|existing| existing.id == track.id) {
@@ -349,7 +381,10 @@ impl TweMusicApp {
                 self.loading_since = Some(Instant::now());
                 self.player_message = Some(format!("Loading {}…", track.title));
             }
-            Err(error) => self.notify(error.to_string()),
+            Err(error) => {
+                self.player_message = None;
+                self.notify(error.to_string());
+            }
         }
     }
 
@@ -400,7 +435,7 @@ impl TweMusicApp {
         } else if self.loading_since.is_some_and(|since| since.elapsed() > Duration::from_secs(2)) {
             self.loading_since = None;
             self.state.playback = PlaybackStatus::Stopped;
-            self.notify("Could not play this track. Try updating yt-dlp (`yt-dlp -U`).".to_owned());
+            self.notify("Could not play this track. YouTube may have changed something; try again, or update TweMusic.".to_owned());
         }
     }
 
@@ -868,9 +903,9 @@ impl TweMusicApp {
             m3::card(ui, CardKind::Filled, |ui| {
                 ui.label(theme::text(Role::TitleMedium, "YouTube Music").color(c.on_surface));
                 ui.add_space(4.0);
-                ui.label(theme::text(Role::BodyMedium, "Search returns public metadata. Play streams the audio only, through MPV and yt-dlp, so no video or ads load.").color(c.on_surface_variant));
+                ui.label(theme::text(Role::BodyMedium, "Search returns public metadata. Play asks YouTube for the audio stream only and plays it through MPV, so no video or ads load.").color(c.on_surface_variant));
                 ui.add_space(4.0);
-                ui.label(theme::text(Role::BodyMedium, "Requires mpv and yt-dlp. This may go against YouTube's terms of service, and yt-dlp needs regular updates.").color(c.on_surface_variant));
+                ui.label(theme::text(Role::BodyMedium, "Requires mpv (yt-dlp is only used to import playlists). This may go against YouTube's terms of service, and YouTube can change how streams work at any time.").color(c.on_surface_variant));
             });
         });
     }
@@ -1049,6 +1084,7 @@ impl eframe::App for TweMusicApp {
     fn update(&mut self, ctx: &Context, _frame: &mut eframe::Frame) {
         self.poll_search();
         self.poll_media();
+        self.poll_stream();
         self.poll_tray(ctx);
         self.handle_close(ctx);
         self.poll_import();
