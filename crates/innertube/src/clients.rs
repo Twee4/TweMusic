@@ -13,14 +13,68 @@ use serde::Deserialize;
 const BUILTIN: &str = include_str!("../clients.json");
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct ClientProfile {
+    /// A label for this profile (shown in error messages).
     pub name: String,
-    pub version: String,
-    pub id: String,
+    /// The `clientName` sent to InnerTube (for example `ANDROID_VR`).
+    pub client_name: String,
+    pub client_version: String,
+    /// The numeric client ID for the `X-YouTube-Client-Name` header. Optional for the
+    /// well-known client names.
+    #[serde(default)]
+    pub client_id: Option<String>,
+    /// Which InnerTube host to call.
+    #[serde(default = "default_host")]
+    pub host: String,
     pub user_agent: String,
+    /// Which endpoints this profile is meant for (`player`, `search`, `browse`).
+    #[serde(default = "default_use_for")]
+    pub use_for: Vec<String>,
+    /// True when the profile's streams need signature / throttling deciphering, which this
+    /// crate can't do yet. Such profiles are kept in the file but skipped.
+    #[serde(default)]
+    pub needs_cipher: bool,
     /// Extra `context.client` fields (OS and device details).
     #[serde(default)]
     pub extra: BTreeMap<String, String>,
+}
+
+fn default_host() -> String {
+    "music.youtube.com".to_owned()
+}
+
+fn default_use_for() -> Vec<String> {
+    vec!["player".to_owned()]
+}
+
+const HOSTS: [&str; 2] = ["music.youtube.com", "www.youtube.com"];
+
+/// Numeric IDs of the well-known clients.
+fn known_id(client_name: &str) -> Option<&'static str> {
+    Some(match client_name {
+        "WEB" => "1",
+        "ANDROID" => "3",
+        "IOS" => "5",
+        "TVHTML5" => "7",
+        "ANDROID_VR" => "28",
+        "WEB_REMIX" => "67",
+        "TVHTML5_SIMPLY" => "75",
+        "VISIONOS" => "101",
+        _ => return None,
+    })
+}
+
+impl ClientProfile {
+    /// The numeric client ID, from the file or from the well-known names.
+    pub fn id(&self) -> &str {
+        self.client_id.as_deref().or_else(|| known_id(&self.client_name)).unwrap_or("")
+    }
+
+    /// True if this profile can be used to look up a playable stream right now.
+    pub fn can_play(&self) -> bool {
+        !self.needs_cipher && self.use_for.iter().any(|endpoint| endpoint == "player")
+    }
 }
 
 #[derive(Deserialize)]
@@ -32,25 +86,29 @@ fn plain(value: &str, max: usize) -> bool {
     !value.is_empty() && value.len() <= max && value.chars().all(|ch| (' '..='~').contains(&ch))
 }
 
-/// Parses and validates a client list. Values end up in HTTP headers, so they must be
-/// printable ASCII and a sensible length.
+/// Parses and validates a client list. Values end up in HTTP headers and URLs, so they must
+/// be printable ASCII, a sensible length, and the host must be one of YouTube's own.
 pub fn parse(text: &str) -> Result<Vec<ClientProfile>, String> {
     let file: File = serde_json::from_str(text).map_err(|error| format!("invalid clients file: {error}"))?;
     if file.clients.is_empty() {
         return Err("the clients file lists no clients".to_owned());
     }
     for client in &file.clients {
+        let id = client.id();
         let extra_ok = client.extra.iter().all(|(key, value)| {
             !key.is_empty() && key.chars().all(|ch| ch.is_ascii_alphanumeric()) && plain(value, 128)
         });
         let fields_ok = plain(&client.name, 64)
-            && plain(&client.version, 32)
-            && client.id.chars().all(|ch| ch.is_ascii_digit())
-            && !client.id.is_empty()
-            && client.id.len() <= 6
-            && plain(&client.user_agent, 300);
+            && plain(&client.client_name, 64)
+            && plain(&client.client_version, 32)
+            && !id.is_empty()
+            && id.len() <= 6
+            && id.chars().all(|ch| ch.is_ascii_digit())
+            && plain(&client.user_agent, 300)
+            && HOSTS.contains(&client.host.as_str())
+            && client.use_for.iter().all(|endpoint| plain(endpoint, 16));
         if !(fields_ok && extra_ok) {
-            return Err(format!("invalid client entry: {} {}", client.name, client.version));
+            return Err(format!("invalid client entry: {} {}", client.name, client.client_version));
         }
     }
     Ok(file.clients)
@@ -96,23 +154,38 @@ mod tests {
     #[test]
     fn the_embedded_list_is_valid() {
         let clients = builtin();
-        assert!(clients.len() >= 2);
-        assert_eq!(clients[0].name, "ANDROID_VR");
+        assert_eq!(clients[0].client_name, "ANDROID_VR");
+        assert_eq!(clients[0].id(), "28");
         assert_eq!(clients[0].extra.get("osName").map(String::as_str), Some("Android"));
+        let playable: Vec<_> = clients.iter().filter(|client| client.can_play()).map(|client| client.name.as_str()).collect();
+        assert_eq!(playable, ["ANDROID_VR", "ANDROID_VR_OLD", "VISIONOS"]);
+        assert!(clients.iter().any(|client| client.name == "WEB_REMIX" && client.needs_cipher));
+    }
+
+    #[test]
+    fn accepts_minimal_entries_and_infers_the_client_id() {
+        let text = r#"{"clients":[{"name":"WEB_REMIX","clientName":"WEB_REMIX","clientVersion":"1.2","userAgent":"ua"}]}"#;
+        let clients = parse(text).unwrap();
+        assert_eq!(clients[0].id(), "67");
+        assert_eq!(clients[0].host, "music.youtube.com");
+        assert!(clients[0].can_play());
     }
 
     #[test]
     fn rejects_bad_overrides() {
+        let entry = |extra: &str| format!(
+            r#"{{"clients":[{{"name":"X","clientName":"X","clientVersion":"1","clientId":"1","userAgent":"ok"{extra}}}]}}"#
+        );
         assert!(parse("{}").is_err());
         assert!(parse(r#"{"clients":[]}"#).is_err());
-        let bad_agent = r#"{"clients":[{"name":"X","version":"1","id":"1","user_agent":"a\r\nHost: evil"}]}"#;
+        assert!(parse(&entry("")).is_ok());
+        assert!(parse(&entry(r#","host":"evil.example""#)).is_err());
+        assert!(parse(&entry(r#","extra":{"a b":"c"}"#)).is_err());
+        assert!(parse(&entry(r#","clientId":"x1""#)).is_err());
+        let bad_agent = r#"{"clients":[{"name":"X","clientName":"X","clientVersion":"1","clientId":"1","userAgent":"a\r\nHost: evil"}]}"#;
         assert!(parse(bad_agent).is_err());
-        let bad_id = r#"{"clients":[{"name":"X","version":"1","id":"x1","user_agent":"ok"}]}"#;
-        assert!(parse(bad_id).is_err());
-        let bad_key = r#"{"clients":[{"name":"X","version":"1","id":"1","user_agent":"ok","extra":{"a b":"c"}}]}"#;
-        assert!(parse(bad_key).is_err());
-        let good = r#"{"clients":[{"name":"X","version":"1","id":"1","user_agent":"ok"}]}"#;
-        assert_eq!(parse(good).unwrap().len(), 1);
+        let unknown_client = r#"{"clients":[{"name":"X","clientName":"NOPE","clientVersion":"1","userAgent":"ok"}]}"#;
+        assert!(parse(unknown_client).is_err());
     }
 
     #[test]

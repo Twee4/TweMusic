@@ -86,8 +86,8 @@ pub fn find_visitor_data(text: &str) -> Option<String> {
 
 fn request_body(client: &ClientProfile, video_id: &str, visitor_data: Option<&str>) -> Value {
     let mut context = serde_json::Map::new();
-    context.insert("clientName".into(), json!(client.name));
-    context.insert("clientVersion".into(), json!(client.version));
+    context.insert("clientName".into(), json!(client.client_name));
+    context.insert("clientVersion".into(), json!(client.client_version));
     context.insert("userAgent".into(), json!(client.user_agent));
     context.insert("hl".into(), json!("en"));
     context.insert("gl".into(), json!("US"));
@@ -118,9 +118,14 @@ pub fn resolve_with(video_id: &str, profiles: &[ClientProfile]) -> Result<Stream
     let http = transport::http_client()?;
     let visitor_data = transport::fetch_visitor_page(&http).and_then(|page| find_visitor_data(&page));
 
+    // Profiles that need signature deciphering are skipped: this crate can't do that yet.
+    let usable: Vec<&ClientProfile> = profiles.iter().filter(|profile| profile.can_play()).collect();
+    if usable.is_empty() {
+        return Err("No usable client profile in clients.json (all need deciphering).".to_owned());
+    }
     let mut last_error = String::new();
-    for index in clients::rotation(profiles.len()) {
-        let client = &profiles[index];
+    for index in clients::rotation(usable.len()) {
+        let client = usable[index];
         let body = request_body(client, video_id, visitor_data.as_deref());
         let attempt = transport::post_player(&http, client, &body, visitor_data.as_deref())
             .and_then(|value| pick_audio_format(&value));
@@ -129,7 +134,7 @@ pub fn resolve_with(video_id: &str, profiles: &[ClientProfile]) -> Result<Stream
                 clients::remember_success(index);
                 return Ok(Stream { url, user_agent: client.user_agent.clone(), mime_type, bitrate });
             }
-            Err(error) => last_error = format!("{} {}: {error}", client.name, client.version),
+            Err(error) => last_error = format!("{} {}: {error}", client.name, client.client_version),
         }
     }
     Err(format!("Could not get a stream from YouTube ({last_error})."))
