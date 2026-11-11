@@ -1,0 +1,10 @@
+[package]
+name = "twe_player"
+version = "0.1.0"
+edition = "2021"
+description = "MPV JSON-IPC audio player controller for TweMusic (Linux)"
+license = "MIT"
+
+[dependencies]
+serde_json = "1"
+twe_innertube = { path = "../innertube" }

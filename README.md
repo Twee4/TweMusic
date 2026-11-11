@@ -15,6 +15,21 @@ TweMusic is a Linux-first music client prototype written in Rust.
 
 Playing a YouTube result looks up its audio stream with the same InnerTube `player` endpoint YouTube's own apps use (acting as the Android VR client, which returns direct stream URLs) and hands the URL to MPV. TweMusic itself does not download or store audio. This may go against YouTube's terms of service, and YouTube can change how streams work at any time, which would need an update to TweMusic. Use it at your own risk.
 
+## Layout
+
+```
+Cargo workspace
+├── crates/innertube   (pure Rust, no UI)  clients.json + clients.rs: client identities and rotation
+│                                          transport.rs: HTTP + headers   player.rs: stream lookup
+│                                          ids.rs: video IDs, thumbnail host allow-list
+├── crates/player      (MPV JSON IPC wrapper)
+├── src/               the native egui app: Material 3 UI, library, tray, notifications, MPRIS
+└── src-tauri/         optional webview experiment (needs WebKitGTK; not built by default)
+```
+
+If YouTube stops accepting a client profile, edit `~/.config/twe_music/clients.json` (same format as
+`crates/innertube/clients.json`) instead of waiting for a new release.
+
 ## Run and test
 
 The default workspace member is the native egui app. The Tauri webview app (which loads

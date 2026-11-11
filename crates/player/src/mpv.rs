@@ -87,10 +87,10 @@ impl MpvPlayer {
         Ok(())
     }
 
-    /// Plays a stream resolved by [`crate::stream::resolve`]. Only Google media hosts over
+    /// Plays a stream resolved by [`twe_innertube::resolve`]. Only Google media hosts over
     /// HTTPS are accepted, and MPV is told to use the same user agent the URL was issued to.
-    pub fn load_stream(&mut self, stream: &crate::stream::Stream) -> Result<(), MpvError> {
-        if !crate::stream::is_allowed_stream_url(&stream.url) {
+    pub fn load_stream(&mut self, stream: &twe_innertube::Stream) -> Result<(), MpvError> {
+        if !twe_innertube::is_allowed_stream_url(&stream.url) {
             return Err(MpvError::IpcUnavailable("refusing to load an unsupported URL".to_owned()));
         }
         self.command(json!(["set_property", "user-agent", stream.user_agent]))?;
