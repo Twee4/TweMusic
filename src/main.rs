@@ -340,7 +340,7 @@ impl TweMusicApp {
         let (tx, rx) = mpsc::channel();
         let wake = self.ctx.clone();
         thread::spawn(move || {
-            let _ = tx.send(stream::resolve(&video_id));
+            let _ = tx.send(stream::resolve(&video_id).map_err(|error| error.to_string()));
             wake.request_repaint();
         });
         // Replacing the receiver drops any older request; its result is simply ignored.
