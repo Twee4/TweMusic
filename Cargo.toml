@@ -16,13 +16,15 @@ serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 souvlaki = { version = "0.9", default-features = false, features = ["use_zbus"] }
 webbrowser = "1"
+twe_innertube = { path = "crates/innertube" }
+twe_player = { path = "crates/player" }
 
 [workspace]
-members = ["src-tauri"]
-# Plain `cargo build` / `cargo test` (and CI) only cover the egui app, so they
-# don't need the WebKitGTK system libraries that the Tauri crate requires.
-# Build the webview app explicitly with `cargo build -p twe_music_tauri`.
-default-members = ["."]
+members = ["crates/innertube", "crates/player", "src-tauri"]
+# Plain `cargo build` / `cargo test` (and CI) cover the egui app and the pure-Rust crates in
+# crates/ (twe_innertube, twe_player). They don't need the WebKitGTK system libraries that the
+# Tauri crate requires; build the webview app explicitly with `cargo build -p twe_music_tauri`.
+default-members = [".", "crates/innertube", "crates/player"]
 
 [profile.dev]
 opt-level = 0
