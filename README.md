@@ -1,6 +1,6 @@
 # TweMusic
 
-TweMusic is a Linux-first music client prototype written in Rust.
+TweMusic is a Linux music client prototype written in Rust.
 
 ## Current functionality
 
