@@ -6,8 +6,6 @@ use serde_json::Value;
 
 use crate::clients::ClientProfile;
 
-pub const ORIGIN: &str = "https://music.youtube.com";
-pub const PLAYER_URL: &str = "https://music.youtube.com/youtubei/v1/player?prettyPrint=false";
 pub const VISITOR_DATA_URL: &str = "https://www.youtube.com/sw.js_data";
 
 pub fn http_client() -> Result<reqwest::blocking::Client, String> {
@@ -29,15 +27,17 @@ pub fn post_player(
     body: &Value,
     visitor_data: Option<&str>,
 ) -> Result<Value, String> {
+    // The host was validated against YouTube's own hosts when the profile was loaded.
+    let origin = format!("https://{}", client.host);
     let mut request = http
-        .post(PLAYER_URL)
+        .post(format!("{origin}/youtubei/v1/player?prettyPrint=false"))
         .header("User-Agent", client.user_agent.as_str())
         .header("X-Goog-Api-Format-Version", "1")
-        .header("X-YouTube-Client-Name", client.id.as_str())
-        .header("X-YouTube-Client-Version", client.version.as_str())
-        .header("Origin", ORIGIN)
-        .header("X-Origin", ORIGIN)
-        .header("Referer", format!("{ORIGIN}/"))
+        .header("X-YouTube-Client-Name", client.id())
+        .header("X-YouTube-Client-Version", client.client_version.as_str())
+        .header("Origin", origin.as_str())
+        .header("X-Origin", origin.as_str())
+        .header("Referer", format!("{origin}/"))
         .json(body);
     if let Some(visitor_data) = visitor_data {
         request = request.header("X-Goog-Visitor-Id", visitor_data);

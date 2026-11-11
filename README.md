@@ -28,7 +28,8 @@ Cargo workspace
 ```
 
 If YouTube stops accepting a client profile, edit `~/.config/twe_music/clients.json` (same format as
-`crates/innertube/clients.json`) instead of waiting for a new release.
+`crates/innertube/clients.json`) instead of waiting for a new release. Profiles marked
+`"needsCipher": true` (the web clients) are kept in the file but skipped until signature deciphering exists.
 
 ## Run and test
 

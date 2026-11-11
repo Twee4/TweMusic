@@ -2,9 +2,13 @@
   "clients": [
     {
       "name": "ANDROID_VR",
-      "version": "1.65.10",
-      "id": "28",
-      "user_agent": "com.google.android.apps.youtube.vr.oculus/1.65.10 (Linux; U; Android 12L; eureka-user Build/SQ3A.220605.009.A1) gzip",
+      "clientName": "ANDROID_VR",
+      "clientVersion": "1.65.10",
+      "clientId": "28",
+      "host": "music.youtube.com",
+      "userAgent": "com.google.android.apps.youtube.vr.oculus/1.65.10 (Linux; U; Android 12L; eureka-user Build/SQ3A.220605.009.A1) gzip",
+      "useFor": ["player"],
+      "needsCipher": false,
       "extra": {
         "osName": "Android",
         "osVersion": "12L",
@@ -14,11 +18,50 @@
       }
     },
     {
-      "name": "ANDROID_VR",
-      "version": "1.61.48",
-      "id": "28",
-      "user_agent": "com.google.android.apps.youtube.vr.oculus/1.61.48 (Linux; U; Android 12; en_US; Oculus Quest 3; Build/SQ3A.220605.009.A1; Cronet/132.0.6808.3)",
-      "extra": {}
+      "name": "ANDROID_VR_OLD",
+      "clientName": "ANDROID_VR",
+      "clientVersion": "1.61.48",
+      "clientId": "28",
+      "host": "music.youtube.com",
+      "userAgent": "com.google.android.apps.youtube.vr.oculus/1.61.48 (Linux; U; Android 12; en_US; Oculus Quest 3; Build/SQ3A.220605.009.A1; Cronet/132.0.6808.3)",
+      "useFor": ["player"],
+      "needsCipher": false
+    },
+    {
+      "name": "VISIONOS",
+      "clientName": "VISIONOS",
+      "clientVersion": "1.02",
+      "clientId": "101",
+      "host": "music.youtube.com",
+      "userAgent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 15_7_3) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/26.0 Safari/605.1.15",
+      "useFor": ["player"],
+      "needsCipher": false,
+      "extra": {
+        "osName": "visionOS",
+        "osVersion": "26.5.23O471",
+        "deviceMake": "Apple",
+        "deviceModel": "RealityDevice17,1"
+      }
+    },
+    {
+      "name": "WEB_REMIX",
+      "clientName": "WEB_REMIX",
+      "clientVersion": "1.20260707.12.00",
+      "clientId": "67",
+      "host": "music.youtube.com",
+      "userAgent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+      "useFor": ["browse", "search", "player"],
+      "needsCipher": true
+    },
+    {
+      "name": "TVHTML5_SIMPLY",
+      "clientName": "TVHTML5_SIMPLY",
+      "clientVersion": "2.0",
+      "clientId": "75",
+      "host": "www.youtube.com",
+      "userAgent": "Mozilla/5.0 (ChromiumStylePlatform) Cobalt/25.lts.30.1034943-gold (unlike Gecko), Unknown_TV_Unknown_0/Unknown (Unknown, Unknown)",
+      "useFor": ["player"],
+      "needsCipher": true
     }
   ]
 }
