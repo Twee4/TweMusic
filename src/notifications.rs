@@ -20,3 +20,20 @@ pub fn show_track(track: &Track) {
             .show();
     });
 }
+
+/// Sends a test notification and reports the outcome through `done` (`None` on success,
+/// otherwise a readable error), so Settings can tell the user whether their desktop has
+/// a notification daemon running.
+pub fn send_test(done: impl FnOnce(Option<String>) + Send + 'static) {
+    thread::spawn(move || {
+        let result = notify_rust::Notification::new()
+            .appname("TweMusic")
+            .summary("TweMusic notifications work")
+            .body("You will see this when a new song starts in the background.")
+            .icon("multimedia-player")
+            .show();
+        done(result.err().map(|error| {
+            format!("No notification daemon answered ({error}). Install and start one, such as mako, dunst or swaync.")
+        }));
+    });
+}

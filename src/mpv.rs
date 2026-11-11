@@ -38,7 +38,7 @@ impl From<std::io::Error> for MpvError {
     fn from(error: std::io::Error) -> Self { Self::Io(error) }
 }
 
-/// Returns true when `yt-dlp` can be run; MPV needs it to play YouTube URLs.
+/// Returns true when `yt-dlp` can be run (only playlist import still uses it).
 pub fn ytdlp_available() -> bool {
     Command::new("yt-dlp")
         .arg("--version")
@@ -66,8 +66,7 @@ impl MpvPlayer {
                 "--idle=yes",
                 "--no-terminal",
                 "--force-window=no",
-                "--ytdl=yes",
-                "--ytdl-format=bestaudio/best",
+                "--ytdl=no",
             ])
             .arg(format!("--input-ipc-server={}", socket_path.display()))
             .stdin(Stdio::null())
@@ -88,13 +87,14 @@ impl MpvPlayer {
         Ok(())
     }
 
-    /// Loads a YouTube Music watch URL; MPV resolves the audio stream through yt-dlp.
-    /// Only `https://music.youtube.com/watch?v=` URLs are accepted.
-    pub fn load_url(&mut self, url: &str) -> Result<(), MpvError> {
-        if !url.starts_with("https://music.youtube.com/watch?v=") {
+    /// Plays a stream resolved by [`crate::stream::resolve`]. Only Google media hosts over
+    /// HTTPS are accepted, and MPV is told to use the same user agent the URL was issued to.
+    pub fn load_stream(&mut self, stream: &crate::stream::Stream) -> Result<(), MpvError> {
+        if !crate::stream::is_allowed_stream_url(&stream.url) {
             return Err(MpvError::IpcUnavailable("refusing to load an unsupported URL".to_owned()));
         }
-        self.command(json!(["loadfile", url, "replace"]))?;
+        self.command(json!(["set_property", "user-agent", stream.user_agent]))?;
+        self.command(json!(["loadfile", stream.url, "replace"]))?;
         Ok(())
     }
 

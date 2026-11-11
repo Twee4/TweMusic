@@ -5,7 +5,7 @@ TweMusic is a Linux-first music client prototype written in Rust.
 ## Current functionality
 
 - Search YouTube Music for public metadata (unofficial endpoint; may change).
-- Play a result: MPV streams the audio only (no video, no ads) using yt-dlp, with a queue, previous/next and auto-advance.
+- Play a result: TweMusic asks YouTube's InnerTube API for the audio-only stream and MPV plays it (no video, no ads), with a queue, previous/next and auto-advance.
 - Keep a library: Liked songs and your own playlists (saved in `~/.local/share/twe_music/library.json`), plus import of public playlists by link. Play a whole playlist in order.
 - Material 3 design: baseline colour roles in light and dark (follows your system, or pick one in Settings), Material type and shape scales, state layers, filled / tonal / outlined / text buttons, filter chips, a search bar, list items, and an adaptive layout (navigation bar under 600dp wide, navigation rail above). Messages appear as snackbars.
 - Album art in track rows and the player, loaded only from YouTube's own image hosts (ytimg.com, googleusercontent.com, ggpht.com).
@@ -13,7 +13,7 @@ TweMusic is a Linux-first music client prototype written in Rust.
 - Open a result on the official YouTube Music website in your browser.
 - Play local audio files with MPV.
 
-Playing a YouTube result hands its URL to MPV, which resolves the audio stream through `yt-dlp`. TweMusic itself does not download or store audio. This may go against YouTube's terms of service, and yt-dlp needs regular updates (`yt-dlp -U`) as YouTube changes. Use it at your own risk.
+Playing a YouTube result looks up its audio stream with the same InnerTube `player` endpoint YouTube's own apps use (acting as the Android VR client, which returns direct stream URLs) and hands the URL to MPV. TweMusic itself does not download or store audio. This may go against YouTube's terms of service, and YouTube can change how streams work at any time, which would need an update to TweMusic. Use it at your own risk.
 
 ## Run and test
 
@@ -30,7 +30,7 @@ cargo test
 cargo run
 ```
 
-Install MPV and yt-dlp (MPV plays local files on its own; YouTube tracks also need yt-dlp):
+Install MPV (and yt-dlp, which is now only used to import playlists by link):
 
 ```bash
 sudo apt install mpv yt-dlp  # Debian/Ubuntu

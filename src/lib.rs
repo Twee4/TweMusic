@@ -8,6 +8,7 @@ pub mod mpv;
 pub mod notifications;
 pub mod settings;
 pub mod state;
+pub mod stream;
 pub mod theme;
 pub mod tray;
 pub mod ytmusic;
