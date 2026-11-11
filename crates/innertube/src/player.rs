@@ -9,7 +9,7 @@ use serde_json::{json, Value};
 
 use crate::{
     clients::{self, ClientProfile},
-    ids, transport,
+    ids, transport, InnerTubeError,
 };
 
 /// A resolved audio stream. The user agent must be sent with the media requests, because
@@ -33,7 +33,7 @@ pub fn is_allowed_stream_url(url: &str) -> bool {
 }
 
 /// Picks the best audio-only format that has a direct URL: highest bitrate, Opus on a tie.
-pub fn pick_audio_format(response: &Value) -> Result<(String, String, u64), String> {
+pub fn pick_audio_format(response: &Value) -> Result<(String, String, u64), InnerTubeError> {
     let status = response
         .pointer("/playabilityStatus/status")
         .and_then(Value::as_str)
@@ -43,12 +43,12 @@ pub fn pick_audio_format(response: &Value) -> Result<(String, String, u64), Stri
             .pointer("/playabilityStatus/reason")
             .and_then(Value::as_str)
             .unwrap_or("not playable");
-        return Err(format!("{status}: {reason}"));
+        return Err(InnerTubeError::Refused(format!("{status}: {reason}")));
     }
     let formats = response
         .pointer("/streamingData/adaptiveFormats")
         .and_then(Value::as_array)
-        .ok_or("the response has no streams")?;
+        .ok_or_else(|| InnerTubeError::Api("the response has no streams".to_owned()))?;
     formats
         .iter()
         .filter_map(|format| {
@@ -65,7 +65,7 @@ pub fn pick_audio_format(response: &Value) -> Result<(String, String, u64), Stri
         })
         .max_by_key(|(mime, _, bitrate)| (*bitrate, mime.contains("opus")))
         .map(|(mime, url, bitrate)| (url, mime, bitrate))
-        .ok_or_else(|| "no audio stream with a direct URL".to_owned())
+        .ok_or(InnerTubeError::NoFormat)
 }
 
 /// Finds the visitor ID in YouTube's `sw.js_data` payload (it looks like `"visitorData":"Cgt…"`
@@ -98,7 +98,7 @@ fn request_body(client: &ClientProfile, video_id: &str, visitor_data: Option<&st
         context.insert("visitorData".into(), json!(visitor_data));
     }
     json!({
-        "context": { "client": context },
+        "context": { "client": context, "user": { "lockedSafetyMode": false } },
         "videoId": video_id,
         "contentCheckOk": true,
         "racyCheckOk": true,
@@ -107,21 +107,21 @@ fn request_body(client: &ClientProfile, video_id: &str, visitor_data: Option<&st
 
 /// Asks YouTube for the audio stream of `video_id`. Blocks on the network, so call it from
 /// a worker thread.
-pub fn resolve(video_id: &str) -> Result<Stream, String> {
+pub fn resolve(video_id: &str) -> Result<Stream, InnerTubeError> {
     resolve_with(video_id, &clients::load())
 }
 
-pub fn resolve_with(video_id: &str, profiles: &[ClientProfile]) -> Result<Stream, String> {
+pub fn resolve_with(video_id: &str, profiles: &[ClientProfile]) -> Result<Stream, InnerTubeError> {
     if ids::youtube_music_url(video_id).is_none() {
-        return Err("YouTube returned an invalid video ID.".to_owned());
+        return Err(InnerTubeError::Api("YouTube returned an invalid video ID.".to_owned()));
     }
     let http = transport::http_client()?;
     let visitor_data = transport::fetch_visitor_page(&http).and_then(|page| find_visitor_data(&page));
 
     // Profiles that need signature deciphering are skipped: this crate can't do that yet.
-    let usable: Vec<&ClientProfile> = profiles.iter().filter(|profile| profile.can_play()).collect();
+    let usable = clients::eligible(profiles, "player");
     if usable.is_empty() {
-        return Err("No usable client profile in clients.json (all need deciphering).".to_owned());
+        return Err(InnerTubeError::Api("No usable client profile in clients.json (all need deciphering).".to_owned()));
     }
     let mut last_error = String::new();
     for index in clients::rotation(usable.len()) {
@@ -137,7 +137,7 @@ pub fn resolve_with(video_id: &str, profiles: &[ClientProfile]) -> Result<Stream
             Err(error) => last_error = format!("{} {}: {error}", client.name, client.client_version),
         }
     }
-    Err(format!("Could not get a stream from YouTube ({last_error})."))
+    Err(InnerTubeError::Api(format!("Could not get a stream from YouTube ({last_error}).")))
 }
 
 #[cfg(test)]
@@ -175,7 +175,7 @@ mod tests {
 
     #[test]
     fn explains_unplayable_and_empty_responses() {
-        let error = pick_audio_format(&response("LOGIN_REQUIRED", json!([]))).unwrap_err();
+        let error = pick_audio_format(&response("LOGIN_REQUIRED", json!([]))).unwrap_err().to_string();
         assert!(error.contains("LOGIN_REQUIRED") && error.contains("Sign in"));
         assert!(pick_audio_format(&response("OK", json!([]))).is_err());
         assert!(pick_audio_format(&json!({ "playabilityStatus": { "status": "OK" } })).is_err());
@@ -197,6 +197,7 @@ mod tests {
         assert_eq!(body["context"]["client"]["clientName"], "ANDROID_VR");
         assert_eq!(body["context"]["client"]["osName"], "Android");
         assert_eq!(body["context"]["client"]["visitorData"], "Cgt");
+        assert_eq!(body["context"]["user"]["lockedSafetyMode"], false);
         assert_eq!(request_body(&profiles[1], "abc123_XYZ0", None)["context"]["client"].get("visitorData"), None);
     }
 }

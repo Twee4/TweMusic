@@ -4,15 +4,12 @@ use std::time::Duration;
 
 use serde_json::Value;
 
-use crate::clients::ClientProfile;
+use crate::{clients::ClientProfile, InnerTubeError};
 
 pub const VISITOR_DATA_URL: &str = "https://www.youtube.com/sw.js_data";
 
-pub fn http_client() -> Result<reqwest::blocking::Client, String> {
-    reqwest::blocking::Client::builder()
-        .timeout(Duration::from_secs(15))
-        .build()
-        .map_err(|error| format!("Could not start the network client: {error}"))
+pub fn http_client() -> Result<reqwest::blocking::Client, InnerTubeError> {
+    Ok(reqwest::blocking::Client::builder().timeout(Duration::from_secs(15)).build()?)
 }
 
 /// Fetches the raw page that contains the visitor ID. Failures just mean "no visitor ID".
@@ -26,7 +23,7 @@ pub fn post_player(
     client: &ClientProfile,
     body: &Value,
     visitor_data: Option<&str>,
-) -> Result<Value, String> {
+) -> Result<Value, InnerTubeError> {
     // The host was validated against YouTube's own hosts when the profile was loaded.
     let origin = format!("https://{}", client.host);
     let mut request = http
@@ -42,9 +39,9 @@ pub fn post_player(
     if let Some(visitor_data) = visitor_data {
         request = request.header("X-Goog-Visitor-Id", visitor_data);
     }
-    let response = request.send().map_err(|error| format!("network error: {error}"))?;
+    let response = request.send()?;
     if !response.status().is_success() {
-        return Err(format!("HTTP {}", response.status()));
+        return Err(InnerTubeError::Api(format!("HTTP {}", response.status())));
     }
-    response.json::<Value>().map_err(|error| format!("unreadable response: {error}"))
+    Ok(response.json::<Value>()?)
 }

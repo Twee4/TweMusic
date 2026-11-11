@@ -134,6 +134,15 @@ pub fn load() -> Vec<ClientProfile> {
         .unwrap_or_else(builtin)
 }
 
+/// The profiles meant for `operation` (`player`, `search` or `browse`), in file order.
+/// Profiles that need deciphering are left out.
+pub fn eligible<'a>(profiles: &'a [ClientProfile], operation: &str) -> Vec<&'a ClientProfile> {
+    profiles
+        .iter()
+        .filter(|profile| !profile.needs_cipher && profile.use_for.iter().any(|name| name == operation))
+        .collect()
+}
+
 /// Index of the client that worked last, so the next lookup tries it first.
 static PREFERRED: AtomicUsize = AtomicUsize::new(0);
 
@@ -160,6 +169,14 @@ mod tests {
         let playable: Vec<_> = clients.iter().filter(|client| client.can_play()).map(|client| client.name.as_str()).collect();
         assert_eq!(playable, ["ANDROID_VR", "ANDROID_VR_OLD", "VISIONOS"]);
         assert!(clients.iter().any(|client| client.name == "WEB_REMIX" && client.needs_cipher));
+    }
+
+    #[test]
+    fn eligible_filters_by_operation_and_cipher() {
+        let clients = builtin();
+        let names: Vec<_> = eligible(&clients, "player").iter().map(|client| client.name.as_str()).collect();
+        assert_eq!(names, ["ANDROID_VR", "ANDROID_VR_OLD", "VISIONOS"]);
+        assert!(eligible(&clients, "search").is_empty()); // only WEB_REMIX, which needs deciphering
     }
 
     #[test]
