@@ -905,7 +905,7 @@ impl TweMusicApp {
                 ui.add_space(4.0);
                 ui.label(theme::text(Role::BodyMedium, "Search returns public metadata. Play asks YouTube for the audio stream only and plays it through MPV, so no video or ads load.").color(c.on_surface_variant));
                 ui.add_space(4.0);
-                ui.label(theme::text(Role::BodyMedium, "Requires mpv (yt-dlp is only used to import playlists). This may go against YouTube's terms of service, and YouTube can change how streams work at any time.").color(c.on_surface_variant));
+                ui.label(theme::text(Role::BodyMedium, "Requires mpv. This may go against YouTube's terms of service, and YouTube can change how streams work at any time.").color(c.on_surface_variant));
             });
         });
     }

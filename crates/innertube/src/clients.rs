@@ -135,12 +135,30 @@ pub fn load() -> Vec<ClientProfile> {
 }
 
 /// The profiles meant for `operation` (`player`, `search` or `browse`), in file order.
-/// Profiles that need deciphering are left out.
+/// Only stream lookups (`player`) need deciphering, so profiles that need it are left out
+/// of that operation alone; they are fine for search and browse.
 pub fn eligible<'a>(profiles: &'a [ClientProfile], operation: &str) -> Vec<&'a ClientProfile> {
     profiles
         .iter()
-        .filter(|profile| !profile.needs_cipher && profile.use_for.iter().any(|name| name == operation))
+        .filter(|profile| (operation != "player" || !profile.needs_cipher) && profile.use_for.iter().any(|name| name == operation))
         .collect()
+}
+
+/// The `context` object of an InnerTube request for this client.
+pub fn build_context(client: &ClientProfile, visitor_data: Option<&str>) -> serde_json::Value {
+    let mut fields = serde_json::Map::new();
+    fields.insert("clientName".into(), serde_json::json!(client.client_name));
+    fields.insert("clientVersion".into(), serde_json::json!(client.client_version));
+    fields.insert("userAgent".into(), serde_json::json!(client.user_agent));
+    fields.insert("hl".into(), serde_json::json!("en"));
+    fields.insert("gl".into(), serde_json::json!("US"));
+    for (key, value) in &client.extra {
+        fields.insert(key.clone(), serde_json::json!(value));
+    }
+    if let Some(visitor_data) = visitor_data {
+        fields.insert("visitorData".into(), serde_json::json!(visitor_data));
+    }
+    serde_json::json!({ "client": fields, "user": { "lockedSafetyMode": false } })
 }
 
 /// Index of the client that worked last, so the next lookup tries it first.
@@ -176,7 +194,10 @@ mod tests {
         let clients = builtin();
         let names: Vec<_> = eligible(&clients, "player").iter().map(|client| client.name.as_str()).collect();
         assert_eq!(names, ["ANDROID_VR", "ANDROID_VR_OLD", "VISIONOS"]);
-        assert!(eligible(&clients, "search").is_empty()); // only WEB_REMIX, which needs deciphering
+        // WEB_REMIX needs deciphering for streams, but search and browse don't.
+        let search: Vec<_> = eligible(&clients, "search").iter().map(|client| client.name.as_str()).collect();
+        assert_eq!(search, ["WEB_REMIX"]);
+        assert_eq!(eligible(&clients, "browse").len(), 1);
     }
 
     #[test]

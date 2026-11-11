@@ -6,7 +6,7 @@ TweMusic is a Linux-first music client prototype written in Rust.
 
 - Search YouTube Music for public metadata (unofficial endpoint; may change).
 - Play a result: TweMusic asks YouTube's InnerTube API for the audio-only stream and MPV plays it (no video, no ads), with a queue, previous/next and auto-advance.
-- Keep a library: Liked songs and your own playlists (saved in `~/.local/share/twe_music/library.json`), plus import of public playlists by link. Play a whole playlist in order.
+- Keep a library: Liked songs and your own playlists (saved in `~/.local/share/twe_music/library.json`), plus import of public playlists by link (through InnerTube, no yt-dlp). Play a whole playlist in order.
 - Material 3 design: baseline colour roles in light and dark (follows your system, or pick one in Settings), Material type and shape scales, state layers, filled / tonal / outlined / text buttons, filter chips, a search bar, list items, and an adaptive layout (navigation bar under 600dp wide, navigation rail above). Messages appear as snackbars.
 - Album art in track rows and the player, loaded only from YouTube's own image hosts (ytimg.com, googleusercontent.com, ggpht.com).
 - Seek bar in the player, and Linux media keys / desktop media widgets (MPRIS: play, pause, next, previous, seek).
@@ -46,12 +46,12 @@ cargo test
 cargo run
 ```
 
-Install MPV (and yt-dlp, which is now only used to import playlists by link):
+Install MPV (TweMusic needs nothing else; it no longer uses yt-dlp):
 
 ```bash
-sudo apt install mpv yt-dlp  # Debian/Ubuntu
-sudo dnf install mpv yt-dlp  # Fedora
-sudo pacman -S mpv yt-dlp    # Arch Linux
+sudo apt install mpv  # Debian/Ubuntu
+sudo dnf install mpv  # Fedora
+sudo pacman -S mpv    # Arch Linux
 ```
 
 Search requires an internet connection. It uses an undocumented YouTube Music metadata endpoint and may need maintenance if the service changes. Use YouTube Music in accordance with its terms and applicable law.

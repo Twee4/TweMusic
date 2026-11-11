@@ -38,17 +38,6 @@ impl From<std::io::Error> for MpvError {
     fn from(error: std::io::Error) -> Self { Self::Io(error) }
 }
 
-/// Returns true when `yt-dlp` can be run (only playlist import still uses it).
-pub fn ytdlp_available() -> bool {
-    Command::new("yt-dlp")
-        .arg("--version")
-        .stdin(Stdio::null())
-        .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .status()
-        .map(|status| status.success())
-        .unwrap_or(false)
-}
 
 pub struct MpvPlayer {
     child: Child,

@@ -85,20 +85,8 @@ pub fn find_visitor_data(text: &str) -> Option<String> {
 }
 
 fn request_body(client: &ClientProfile, video_id: &str, visitor_data: Option<&str>) -> Value {
-    let mut context = serde_json::Map::new();
-    context.insert("clientName".into(), json!(client.client_name));
-    context.insert("clientVersion".into(), json!(client.client_version));
-    context.insert("userAgent".into(), json!(client.user_agent));
-    context.insert("hl".into(), json!("en"));
-    context.insert("gl".into(), json!("US"));
-    for (key, value) in &client.extra {
-        context.insert(key.clone(), json!(value));
-    }
-    if let Some(visitor_data) = visitor_data {
-        context.insert("visitorData".into(), json!(visitor_data));
-    }
     json!({
-        "context": { "client": context, "user": { "lockedSafetyMode": false } },
+        "context": clients::build_context(client, visitor_data),
         "videoId": video_id,
         "contentCheckOk": true,
         "racyCheckOk": true,
