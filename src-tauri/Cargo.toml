@@ -9,3 +9,5 @@ tauri-build = { version = "2.0.0", features = [] }
 [dependencies]
 tauri = { version = "2.0.0", features = [] }
 serde_json = "1"
+twe_innertube = { path = "../crates/innertube" }
+twe_player = { path = "../crates/player" }

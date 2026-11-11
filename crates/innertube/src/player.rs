@@ -2,49 +2,15 @@
 //! `player` endpoint, so playback needs no yt-dlp.
 //!
 //! The request mimics the Android VR client, which (unlike the web clients) returns
-//! plain stream URLs without signature or throttling challenges. A few client profiles
-//! are tried in order because YouTube changes which ones work from time to time.
-
-use std::time::Duration;
+//! plain stream URLs without signature or throttling challenges. The client profiles come
+//! from `clients.json` and are tried in turn, because YouTube changes which ones work.
 
 use serde_json::{json, Value};
 
-const PLAYER_URL: &str = "https://music.youtube.com/youtubei/v1/player?prettyPrint=false";
-const VISITOR_DATA_URL: &str = "https://www.youtube.com/sw.js_data";
-const ORIGIN: &str = "https://music.youtube.com";
-
-/// A client identity sent to InnerTube.
-struct Client {
-    name: &'static str,
-    version: &'static str,
-    id: &'static str,
-    user_agent: &'static str,
-    /// Extra fields of the `context.client` object (OS and device details).
-    extra: &'static [(&'static str, &'static str)],
-}
-
-const CLIENTS: &[Client] = &[
-    Client {
-        name: "ANDROID_VR",
-        version: "1.65.10",
-        id: "28",
-        user_agent: "com.google.android.apps.youtube.vr.oculus/1.65.10 (Linux; U; Android 12L; eureka-user Build/SQ3A.220605.009.A1) gzip",
-        extra: &[
-            ("osName", "Android"),
-            ("osVersion", "12L"),
-            ("deviceMake", "Oculus"),
-            ("deviceModel", "Quest 3"),
-            ("androidSdkVersion", "32"),
-        ],
-    },
-    Client {
-        name: "ANDROID_VR",
-        version: "1.61.48",
-        id: "28",
-        user_agent: "com.google.android.apps.youtube.vr.oculus/1.61.48 (Linux; U; Android 12; en_US; Oculus Quest 3; Build/SQ3A.220605.009.A1; Cronet/132.0.6808.3)",
-        extra: &[],
-    },
-];
+use crate::{
+    clients::{self, ClientProfile},
+    ids, transport,
+};
 
 /// A resolved audio stream. The user agent must be sent with the media requests, because
 /// the stream URL is bound to the client that asked for it.
@@ -118,15 +84,15 @@ pub fn find_visitor_data(text: &str) -> Option<String> {
     None
 }
 
-fn request_body(client: &Client, video_id: &str, visitor_data: Option<&str>) -> Value {
+fn request_body(client: &ClientProfile, video_id: &str, visitor_data: Option<&str>) -> Value {
     let mut context = serde_json::Map::new();
     context.insert("clientName".into(), json!(client.name));
     context.insert("clientVersion".into(), json!(client.version));
     context.insert("userAgent".into(), json!(client.user_agent));
     context.insert("hl".into(), json!("en"));
     context.insert("gl".into(), json!("US"));
-    for (key, value) in client.extra {
-        context.insert((*key).into(), json!(value));
+    for (key, value) in &client.extra {
+        context.insert(key.clone(), json!(value));
     }
     if let Some(visitor_data) = visitor_data {
         context.insert("visitorData".into(), json!(visitor_data));
@@ -139,52 +105,29 @@ fn request_body(client: &Client, video_id: &str, visitor_data: Option<&str>) -> 
     })
 }
 
-fn fetch_visitor_data(http: &reqwest::blocking::Client) -> Option<String> {
-    let text = http.get(VISITOR_DATA_URL).send().ok()?.text().ok()?;
-    find_visitor_data(&text)
-}
-
 /// Asks YouTube for the audio stream of `video_id`. Blocks on the network, so call it from
 /// a worker thread.
 pub fn resolve(video_id: &str) -> Result<Stream, String> {
-    if crate::ytmusic::youtube_music_url(video_id).is_none() {
+    resolve_with(video_id, &clients::load())
+}
+
+pub fn resolve_with(video_id: &str, profiles: &[ClientProfile]) -> Result<Stream, String> {
+    if ids::youtube_music_url(video_id).is_none() {
         return Err("YouTube returned an invalid video ID.".to_owned());
     }
-    let http = reqwest::blocking::Client::builder()
-        .timeout(Duration::from_secs(15))
-        .build()
-        .map_err(|error| format!("Could not start the network client: {error}"))?;
-    let visitor_data = fetch_visitor_data(&http);
+    let http = transport::http_client()?;
+    let visitor_data = transport::fetch_visitor_page(&http).and_then(|page| find_visitor_data(&page));
 
     let mut last_error = String::new();
-    for client in CLIENTS {
-        let mut request = http
-            .post(PLAYER_URL)
-            .header("User-Agent", client.user_agent)
-            .header("X-Goog-Api-Format-Version", "1")
-            .header("X-YouTube-Client-Name", client.id)
-            .header("X-YouTube-Client-Version", client.version)
-            .header("Origin", ORIGIN)
-            .header("X-Origin", ORIGIN)
-            .header("Referer", format!("{ORIGIN}/"))
-            .json(&request_body(client, video_id, visitor_data.as_deref()));
-        if let Some(visitor_data) = &visitor_data {
-            request = request.header("X-Goog-Visitor-Id", visitor_data);
-        }
-        let attempt = request
-            .send()
-            .map_err(|error| format!("network error: {error}"))
-            .and_then(|response| {
-                if response.status().is_success() {
-                    response.json::<Value>().map_err(|error| format!("unreadable response: {error}"))
-                } else {
-                    Err(format!("HTTP {}", response.status()))
-                }
-            })
+    for index in clients::rotation(profiles.len()) {
+        let client = &profiles[index];
+        let body = request_body(client, video_id, visitor_data.as_deref());
+        let attempt = transport::post_player(&http, client, &body, visitor_data.as_deref())
             .and_then(|value| pick_audio_format(&value));
         match attempt {
             Ok((url, mime_type, bitrate)) => {
-                return Ok(Stream { url, user_agent: client.user_agent.to_owned(), mime_type, bitrate });
+                clients::remember_success(index);
+                return Ok(Stream { url, user_agent: client.user_agent.clone(), mime_type, bitrate });
             }
             Err(error) => last_error = format!("{} {}: {error}", client.name, client.version),
         }
@@ -243,11 +186,12 @@ mod tests {
 
     #[test]
     fn request_body_carries_client_and_video() {
-        let body = request_body(&CLIENTS[0], "abc123_XYZ0", Some("Cgt"));
+        let profiles = clients::builtin();
+        let body = request_body(&profiles[0], "abc123_XYZ0", Some("Cgt"));
         assert_eq!(body["videoId"], "abc123_XYZ0");
         assert_eq!(body["context"]["client"]["clientName"], "ANDROID_VR");
         assert_eq!(body["context"]["client"]["osName"], "Android");
         assert_eq!(body["context"]["client"]["visitorData"], "Cgt");
-        assert_eq!(request_body(&CLIENTS[1], "abc123_XYZ0", None)["context"]["client"].get("visitorData"), None);
+        assert_eq!(request_body(&profiles[1], "abc123_XYZ0", None)["context"]["client"].get("visitorData"), None);
     }
 }

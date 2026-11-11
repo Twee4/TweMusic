@@ -5,6 +5,10 @@ use serde_json::{json, Value};
 
 use crate::models::Track;
 
+pub use twe_innertube::ids::{
+    best_thumbnail, is_allowed_thumbnail_url, stable_id, upscale_thumbnail, youtube_music_url,
+};
+
 const SEARCH_URL: &str = "https://music.youtube.com/youtubei/v1/search?prettyPrint=false";
 const CLIENT_VERSION: &str = "1.20250616.01.00";
 
@@ -61,14 +65,6 @@ pub fn search_tracks(query: &str) -> Result<Vec<Track>, SearchError> {
     let mut seen = HashSet::new();
     collect_video_renderers(&response, &mut tracks, &mut seen);
     Ok(tracks)
-}
-
-/// Build the official YouTube Music watch URL for a parsed video ID.
-/// Only standard 11-character YouTube IDs are accepted.
-pub fn youtube_music_url(video_id: &str) -> Option<String> {
-    let valid = video_id.len() == 11
-        && video_id.bytes().all(|byte| byte.is_ascii_alphanumeric() || byte == b'_' || byte == b'-');
-    valid.then(|| format!("https://music.youtube.com/watch?v={video_id}"))
 }
 
 fn collect_video_renderers(value: &Value, tracks: &mut Vec<Track>, seen: &mut HashSet<String>) {
@@ -188,50 +184,6 @@ fn parse_music_item(renderer: &Value, seen: &mut HashSet<String>) -> Option<Trac
     })
 }
 
-/// Image hosts TweMusic is willing to fetch album art from.
-const THUMBNAIL_HOSTS: [&str; 3] = ["ytimg.com", "googleusercontent.com", "ggpht.com"];
-
-/// True for https URLs on YouTube's own image hosts. Anything else is never fetched.
-pub fn is_allowed_thumbnail_url(url: &str) -> bool {
-    if url.len() > 2048 {
-        return false;
-    }
-    let Some(rest) = url.strip_prefix("https://") else { return false; };
-    let authority = rest.split(|c| c == '/' || c == '?' || c == '#').next().unwrap_or_default();
-    if authority.is_empty() || authority.contains('@') || authority.contains(':') {
-        return false;
-    }
-    let host = authority.to_ascii_lowercase();
-    THUMBNAIL_HOSTS
-        .iter()
-        .any(|allowed| host == *allowed || host.ends_with(&format!(".{allowed}")))
-}
-
-/// Asks Google's image servers for a size that stays sharp at 48dp on HiDPI screens.
-fn upscale_thumbnail(url: &str) -> String {
-    const SIZED: &str = "=w226-h226-l90-rj";
-    let is_google_image = url.contains("googleusercontent.com/") || url.contains("ggpht.com/");
-    if let (true, Some(index)) = (is_google_image, url.rfind('=')) {
-        let suffix = &url[index + 1..];
-        let looks_sized = suffix.starts_with('w') && suffix[1..].starts_with(|c: char| c.is_ascii_digit());
-        if looks_sized {
-            return format!("{}{}", &url[..index], SIZED);
-        }
-    }
-    url.to_owned()
-}
-
-/// The largest allowed thumbnail in a `thumbnails` array (YouTube lists smallest first).
-pub(crate) fn best_thumbnail(thumbnails: &Value) -> Option<String> {
-    thumbnails
-        .as_array()?
-        .iter()
-        .rev()
-        .filter_map(|item| item.get("url").and_then(Value::as_str))
-        .find(|url| is_allowed_thumbnail_url(url))
-        .map(upscale_thumbnail)
-}
-
 fn text_field(value: &Value) -> Option<String> {
     value.get("simpleText").and_then(Value::as_str).map(str::to_owned)
         .or_else(|| value.get("runs")?.as_array()?.iter()
@@ -246,12 +198,6 @@ fn parse_duration(value: &str) -> Option<Duration> {
     let minutes = parts.next()?.parse::<u64>().ok()?;
     let hours = parts.next().map(str::parse::<u64>).transpose().ok()?.unwrap_or(0);
     Some(Duration::from_secs(hours.saturating_mul(3600).saturating_add(minutes.saturating_mul(60)).saturating_add(seconds)))
-}
-
-pub(crate) fn stable_id(value: &str) -> u64 {
-    value.bytes().fold(0xcbf29ce484222325_u64, |hash, byte| {
-        (hash ^ u64::from(byte)).wrapping_mul(0x100000001b3)
-    })
 }
 
 #[cfg(test)]
