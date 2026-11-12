@@ -11,6 +11,7 @@ pub mod settings;
 pub mod state;
 pub mod theme;
 pub mod tray;
+pub mod ytdlp;
 pub mod ytmusic;
 
 // The player and the InnerTube client live in their own crates; these keep the old paths.

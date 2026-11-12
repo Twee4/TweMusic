@@ -13,11 +13,14 @@ pub struct Settings {
     pub tray: bool,
     /// Tint the app with colours taken from the album art of the current song.
     pub dynamic_color: bool,
+    /// When YouTube's bot check blocks the direct lookup: the browser whose signed-in cookies
+    /// yt-dlp should use instead (None = never use yt-dlp). See `ytdlp::BROWSERS`.
+    pub ytdlp_browser: Option<String>,
 }
 
 impl Default for Settings {
     fn default() -> Self {
-        Self { notifications: true, tray: false, dynamic_color: true }
+        Self { notifications: true, tray: false, dynamic_color: true, ytdlp_browser: None }
     }
 }
 
@@ -52,16 +55,16 @@ mod tests {
 
     #[test]
     fn defaults_and_partial_files() {
-        assert_eq!(Settings::default(), Settings { notifications: true, tray: false, dynamic_color: true });
+        assert_eq!(Settings::default(), Settings { notifications: true, tray: false, dynamic_color: true, ytdlp_browser: None });
         let partial: Settings = serde_json::from_str(r#"{ "tray": true }"#).unwrap();
-        assert_eq!(partial, Settings { notifications: true, tray: true, dynamic_color: true });
+        assert_eq!(partial, Settings { notifications: true, tray: true, dynamic_color: true, ytdlp_browser: None });
     }
 
     #[test]
     fn round_trip_and_bad_file() {
         let dir = std::env::temp_dir().join(format!("twe-music-settings-{}", std::process::id()));
         let path = dir.join("settings.json");
-        let settings = Settings { notifications: false, tray: true, dynamic_color: false };
+        let settings = Settings { notifications: false, tray: true, dynamic_color: false, ytdlp_browser: Some("firefox".to_owned()) };
         settings.save_to(&path).unwrap();
         assert_eq!(Settings::load_from(&path), settings);
         fs::write(&path, "not json").unwrap();

@@ -8,6 +8,7 @@ use souvlaki::{MediaControlEvent, MediaPosition};
 use twe_music::{
     dynamic_color::{self, Transition},
     prefetch,
+    ytdlp,
     icons::Icon,
     import,
     library::{self, Library, SavedTrack},
@@ -18,7 +19,7 @@ use twe_music::{
     mpv::{MpvError, MpvPlayer},
     settings::{self, Settings},
     state::{AppState, PlaybackStatus},
-    stream::{self, Stream},
+    stream::Stream,
     theme::{self, shape, ColorScheme, Role, WindowSize},
     tray::{TrayCommand, TrayHandle},
     ytmusic,
@@ -363,8 +364,9 @@ impl TweMusicApp {
         };
         let (tx, rx) = mpsc::channel();
         let wake = self.ctx.clone();
+        let browser = self.ytdlp_browser();
         thread::spawn(move || {
-            let _ = tx.send(stream::resolve(&video_id).map_err(|error| error.to_string()));
+            let _ = tx.send(ytdlp::resolve(&video_id, browser.as_deref()));
             wake.request_repaint();
         });
         // Replacing the receiver drops any older request; its result is simply ignored.
@@ -498,13 +500,19 @@ impl TweMusicApp {
         }
     }
 
+    /// The browser to sign in through when YouTube's bot check blocks the direct lookup.
+    fn ytdlp_browser(&self) -> Option<String> {
+        self.settings.ytdlp_browser.clone().filter(|name| ytdlp::is_supported_browser(name))
+    }
+
     /// Resolves `track`'s stream on a worker thread, for prefetching or refreshing.
     fn resolve_in_background(&self, track: &Track) -> Option<Receiver<Result<Stream, String>>> {
         let video_id = track.video_id.clone().filter(|id| ytmusic::youtube_music_url(id).is_some())?;
         let (tx, rx) = mpsc::channel();
         let wake = self.ctx.clone();
+        let browser = self.ytdlp_browser();
         thread::spawn(move || {
-            let _ = tx.send(stream::resolve(&video_id).map_err(|error| error.to_string()));
+            let _ = tx.send(ytdlp::resolve(&video_id, browser.as_deref()));
             wake.request_repaint();
         });
         Some(rx)
@@ -1168,6 +1176,22 @@ impl TweMusicApp {
                 ui.label(theme::text(Role::BodyMedium, "Search returns public metadata. Play asks YouTube for the audio stream only and plays it through MPV, so no video or ads load.").color(c.on_surface_variant));
                 ui.add_space(4.0);
                 ui.label(theme::text(Role::BodyMedium, "Requires mpv. This may go against YouTube's terms of service, and YouTube can change how streams work at any time.").color(c.on_surface_variant));
+                ui.add_space(16.0);
+                ui.label(theme::text(Role::TitleSmall, "If YouTube blocks this connection").color(c.on_surface));
+                ui.add_space(4.0);
+                ui.label(theme::text(Role::BodyMedium, "Sign in through your browser: yt-dlp reads your signed-in YouTube session from the browser you pick and only the stream address comes back. TweMusic never stores your cookies. Needs yt-dlp (and deno or node) installed, and you signed in to YouTube in that browser.").color(c.on_surface_variant));
+                ui.add_space(12.0);
+                let labels = ["Off", "Firefox", "Chromium", "Chrome", "Brave", "Vivaldi"];
+                let current = self
+                    .settings
+                    .ytdlp_browser
+                    .as_deref()
+                    .and_then(|name| ytdlp::BROWSERS.iter().position(|known| *known == name))
+                    .map_or(0, |index| index + 1);
+                if let Some(choice) = m3::segmented(ui, &labels, current) {
+                    self.settings.ytdlp_browser = choice.checked_sub(1).and_then(|index| ytdlp::BROWSERS.get(index)).map(|name| (*name).to_owned());
+                    self.save_settings();
+                }
             });
         });
     }
