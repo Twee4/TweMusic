@@ -7,6 +7,7 @@ use eframe::egui::{
 use souvlaki::{MediaControlEvent, MediaPosition};
 use twe_music::{
     dynamic_color::{self, Transition},
+    prefetch,
     icons::Icon,
     import,
     library::{self, Library, SavedTrack},
@@ -110,6 +111,19 @@ struct TweMusicApp {
     notice_tx: Sender<String>,
     notice_rx: Receiver<String>,
     /// Colour scheme following the album art, and the artwork it is following.
+    /// When the stream mpv is playing was issued (None while a local file plays).
+    stream_issued: Option<Instant>,
+    refresh_rx: Option<(TrackId, Receiver<Result<Stream, String>>)>,
+    refresh_backoff: Option<Instant>,
+    /// Where to seek once a refreshed stream has loaded.
+    resume_at: Option<f64>,
+    prefetch_rx: Option<(TrackId, Receiver<Result<Stream, String>>)>,
+    /// The next track whose lookup was started, so a failed one is not retried in a loop.
+    prefetch_tried: Option<TrackId>,
+    /// The next track, already queued in mpv so it follows without a gap, and when it was issued.
+    queued_next: Option<(TrackId, Instant)>,
+    /// The track the "now playing" notification was last shown for.
+    announced: Option<TrackId>,
     scheme: Transition,
     art_url: Option<String>,
     art_rx: Option<Receiver<(String, Option<f32>)>>,
@@ -142,6 +156,8 @@ impl TweMusicApp {
             theme_pref,
             settings, settings_path, tray: None, tray_tx, tray_rx, tray_synced: None, quit_requested: false,
             notice_tx, notice_rx, scheme: Transition::new(), art_url: None, art_rx: None,
+            stream_issued: None, refresh_rx: None, refresh_backoff: None, resume_at: None,
+            prefetch_rx: None, prefetch_tried: None, queued_next: None, announced: None,
         };
         if app.settings.tray {
             app.start_tray(&ctx);
@@ -453,6 +469,12 @@ impl TweMusicApp {
                     self.state.tracks.push(track.clone());
                 }
                 self.state.play_track(track.id);
+                self.stream_issued = Some(Instant::now());
+                self.queued_next = None;
+                self.prefetch_rx = None;
+                self.prefetch_tried = None;
+                self.refresh_rx = None;
+                self.resume_at = None;
                 if self.state.adjacent_remote(true).is_none() {
                     self.start_related(track);
                 }
@@ -476,6 +498,131 @@ impl TweMusicApp {
         }
     }
 
+    /// Resolves `track`'s stream on a worker thread, for prefetching or refreshing.
+    fn resolve_in_background(&self, track: &Track) -> Option<Receiver<Result<Stream, String>>> {
+        let video_id = track.video_id.clone().filter(|id| ytmusic::youtube_music_url(id).is_some())?;
+        let (tx, rx) = mpsc::channel();
+        let wake = self.ctx.clone();
+        thread::spawn(move || {
+            let _ = tx.send(stream::resolve(&video_id).map_err(|error| error.to_string()));
+            wake.request_repaint();
+        });
+        Some(rx)
+    }
+
+    /// Keeps playback gapless: shortly before a track ends, looks up the next one and queues
+    /// it in mpv, and notices when mpv has moved on to it by itself.
+    fn handle_gapless(&mut self, position: Option<f64>, duration: Option<f64>) {
+        if self.stream_issued.is_none() {
+            return;
+        }
+        let next = self.state.adjacent_remote(true);
+        if let Some((queued, _)) = self.queued_next {
+            if self.mpv.as_mut().and_then(|player| player.playlist_pos()) == Some(1) {
+                self.finish_advance(queued);
+            } else if next != Some(queued) {
+                // The queue changed under the prefetched entry: drop it and look again.
+                if let Some(player) = self.mpv.as_mut() {
+                    player.clear_queued();
+                }
+                self.queued_next = None;
+                self.prefetch_tried = None;
+            }
+            return;
+        }
+        if self.prefetch_rx.is_some() || !prefetch::should_prefetch(position, duration) {
+            return;
+        }
+        let Some(next_id) = next else { return };
+        if self.prefetch_tried == Some(next_id) {
+            return;
+        }
+        let Some(track) = self.state.tracks.iter().find(|track| track.id == next_id).cloned() else { return };
+        self.prefetch_tried = Some(next_id);
+        self.prefetch_rx = self.resolve_in_background(&track).map(|rx| (next_id, rx));
+    }
+
+    fn poll_prefetch(&mut self) {
+        let Some((id, rx)) = &self.prefetch_rx else { return };
+        let id = *id;
+        let result = match rx.try_recv() {
+            Ok(result) => result,
+            Err(TryRecvError::Empty) => return,
+            Err(TryRecvError::Disconnected) => Err(String::new()),
+        };
+        self.prefetch_rx = None;
+        // A failed lookup just means the normal path (resolve at the end of the track) is used.
+        let Ok(stream) = result else { return };
+        if self.state.adjacent_remote(true) != Some(id) {
+            return;
+        }
+        if let Some(player) = self.mpv.as_mut() {
+            if player.queue_stream(&stream).is_ok() {
+                self.queued_next = Some((id, Instant::now()));
+            }
+        }
+    }
+
+    /// mpv has started the queued track by itself: make it the current one.
+    fn finish_advance(&mut self, id: TrackId) {
+        let issued = self.queued_next.take().map(|(_, issued)| issued);
+        if let Some(player) = self.mpv.as_mut() {
+            player.drop_finished_entry();
+        }
+        let Some(track) = self.state.tracks.iter().find(|track| track.id == id).cloned() else { return };
+        self.state.play_track(id);
+        self.stream_issued = issued.or(Some(Instant::now()));
+        self.prefetch_tried = None;
+        self.position = None;
+        self.duration = None;
+        if self.state.adjacent_remote(true).is_none() {
+            self.start_related(&track);
+        }
+    }
+
+    /// Looks the current stream up again when YouTube's URL for it is about to expire, then
+    /// resumes from the same position (also while paused, so resuming later still works).
+    fn update_stream_refresh(&mut self, ctx: &Context) {
+        if let Some((id, rx)) = &self.refresh_rx {
+            let id = *id;
+            let result = match rx.try_recv() {
+                Ok(result) => Some(result),
+                Err(TryRecvError::Empty) => None,
+                Err(TryRecvError::Disconnected) => Some(Err(String::new())),
+            };
+            if let Some(result) = result {
+                self.refresh_rx = None;
+                if let (Ok(stream), true) = (result, self.state.current_track().map(|track| track.id) == Some(id)) {
+                    if let Some(player) = self.mpv.as_mut() {
+                        let at = player.position();
+                        if player.load_stream(&stream).is_ok() {
+                            self.resume_at = at.filter(|value| *value > 1.0);
+                            self.stream_issued = Some(Instant::now());
+                            self.queued_next = None;
+                            self.prefetch_rx = None;
+                            self.prefetch_tried = None;
+                            self.played_something = false;
+                            self.loading_since = Some(Instant::now());
+                        }
+                    }
+                }
+            }
+        }
+        let Some(issued) = self.stream_issued else { return };
+        // Wake up now and then, even while paused, to notice an aging stream.
+        ctx.request_repaint_after(Duration::from_secs(60));
+        let active = matches!(self.state.playback, PlaybackStatus::Playing | PlaybackStatus::Paused);
+        if !active || self.refresh_rx.is_some() || !prefetch::stream_is_stale(issued.elapsed()) {
+            return;
+        }
+        if self.refresh_backoff.is_some_and(|at| at.elapsed() < Duration::from_secs(60)) {
+            return;
+        }
+        let Some(track) = self.state.current_track().cloned() else { return };
+        self.refresh_backoff = Some(Instant::now());
+        self.refresh_rx = self.resolve_in_background(&track).map(|rx| (track.id, rx));
+    }
+
     /// Polls MPV for progress, detects the end of a track, and auto-advances the queue.
     fn tick_player(&mut self, ctx: &Context) {
         if self.state.playback != PlaybackStatus::Playing { return; }
@@ -493,6 +640,11 @@ impl TweMusicApp {
         if position.is_some_and(|value| value > 0.0) {
             if !self.played_something {
                 self.player_message = None;
+            }
+            // Announce each track once, including one that followed gaplessly or was refreshed.
+            let current = self.state.current_track().map(|track| track.id);
+            if current != self.announced {
+                self.announced = current;
                 let in_background = ctx.input(|input| input.viewport().focused) == Some(false);
                 if self.settings.notifications && in_background {
                     if let Some(track) = self.state.current_track() {
@@ -500,9 +652,18 @@ impl TweMusicApp {
                     }
                 }
             }
+            // A refreshed stream starts from the beginning: go back to where it was.
+            if position.is_some_and(|value| value < 3.0) {
+                if let Some(at) = self.resume_at.take() {
+                    if let Some(player) = self.mpv.as_mut() {
+                        let _ = player.seek_to(at);
+                    }
+                }
+            }
             self.played_something = true;
             self.loading_since = None;
         }
+        self.handle_gapless(position, duration);
         if !idle { return; }
         if self.played_something {
             self.played_something = false;
@@ -572,6 +733,11 @@ impl TweMusicApp {
             Ok(_) => { self.notify("The selected path is not a file.".to_owned()); return; }
             Err(error) => { self.notify(format!("Cannot open file: {error}")); return; }
         };
+        // A local file is not a YouTube stream: nothing to refresh or queue behind it.
+        self.stream_issued = None;
+        self.queued_next = None;
+        self.prefetch_rx = None;
+        self.refresh_rx = None;
         if let Some(player) = &mut self.mpv {
             match player.load_file(&canonical) {
                 Ok(()) => {
@@ -1183,6 +1349,8 @@ impl eframe::App for TweMusicApp {
         self.poll_media();
         self.poll_stream();
         self.poll_related();
+        self.poll_prefetch();
+        self.update_stream_refresh(ctx);
         self.update_dynamic_color(ctx);
         self.poll_tray(ctx);
         self.handle_close(ctx);
