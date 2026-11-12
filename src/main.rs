@@ -6,6 +6,7 @@ use eframe::egui::{
 };
 use souvlaki::{MediaControlEvent, MediaPosition};
 use twe_music::{
+    dynamic_color::{self, Transition},
     icons::Icon,
     import,
     library::{self, Library, SavedTrack},
@@ -79,6 +80,9 @@ struct TweMusicApp {
     stream_rx: Option<Receiver<Result<Stream, String>>>,
     /// The track whose stream is being resolved.
     pending_track: Option<Track>,
+    related_rx: Option<Receiver<Result<Vec<Track>, String>>>,
+    /// The track the Up next list was last requested for, so it is fetched once per track.
+    related_for: Option<TrackId>,
     last_poll: Instant,
     position: Option<f64>,
     duration: Option<f64>,
@@ -105,6 +109,10 @@ struct TweMusicApp {
     quit_requested: bool,
     notice_tx: Sender<String>,
     notice_rx: Receiver<String>,
+    /// Colour scheme following the album art, and the artwork it is following.
+    scheme: Transition,
+    art_url: Option<String>,
+    art_rx: Option<Receiver<(String, Option<f32>)>>,
 }
 
 impl TweMusicApp {
@@ -126,14 +134,14 @@ impl TweMusicApp {
         let mut app = Self {
             state: AppState::new(), search_rx: None, search_in_flight: false,
             mpv: None, local_file_path: String::new(), player_message: None, snackbar: None,
-            ctx: ctx.clone(), stream_rx: None, pending_track: None, last_poll: Instant::now(), position: None, duration: None,
+            ctx: ctx.clone(), stream_rx: None, pending_track: None, related_rx: None, related_for: None, last_poll: Instant::now(), position: None, duration: None,
             played_something: false, loading_since: None,
             library, library_path, selected_playlist: 0, new_playlist_name: String::new(),
             import_url: String::new(), import_rx: None,
             media, media_rx, media_synced: None, seek_drag: None,
             theme_pref,
             settings, settings_path, tray: None, tray_tx, tray_rx, tray_synced: None, quit_requested: false,
-            notice_tx, notice_rx,
+            notice_tx, notice_rx, scheme: Transition::new(), art_url: None, art_rx: None,
         };
         if app.settings.tray {
             app.start_tray(&ctx);
@@ -367,6 +375,76 @@ impl TweMusicApp {
         }
     }
 
+    /// Fetches songs similar to `track` in the background and queues them after it.
+    fn start_related(&mut self, track: &Track) {
+        let Some(video_id) = track.video_id.clone() else { return; };
+        if self.related_for == Some(track.id) {
+            return;
+        }
+        self.related_for = Some(track.id);
+        let (tx, rx) = mpsc::channel();
+        let wake = self.ctx.clone();
+        thread::spawn(move || {
+            let _ = tx.send(ytmusic::related_tracks(&video_id));
+            wake.request_repaint();
+        });
+        self.related_rx = Some(rx);
+    }
+
+    fn poll_related(&mut self) {
+        let Some(rx) = &self.related_rx else { return; };
+        let result = match rx.try_recv() {
+            Ok(result) => result,
+            Err(TryRecvError::Empty) => return,
+            Err(TryRecvError::Disconnected) => Ok(Vec::new()),
+        };
+        self.related_rx = None;
+        // A failed lookup is not worth interrupting playback for; the queue just stays as it is.
+        if let Ok(tracks) = result {
+            self.state.append_to_queue(tracks);
+        }
+    }
+
+    /// Follows the current song's artwork: fetches it when the song changes, then eases the
+    /// whole app's colours to the scheme derived from it.
+    fn update_dynamic_color(&mut self, ctx: &Context) {
+        let wanted = if self.settings.dynamic_color {
+            self.state.current_track().and_then(|track| track.thumbnail_url.clone())
+        } else {
+            None
+        };
+        if wanted != self.art_url {
+            self.art_url = wanted.clone();
+            self.art_rx = None;
+            match wanted {
+                Some(url) => {
+                    let (tx, rx) = mpsc::channel();
+                    let wake = ctx.clone();
+                    thread::spawn(move || {
+                        let hue = dynamic_color::hue_from_url(&url);
+                        let _ = tx.send((url, hue));
+                        wake.request_repaint();
+                    });
+                    self.art_rx = Some(rx);
+                }
+                None => self.scheme.retarget(None),
+            }
+        }
+        if let Some(Ok((url, hue))) = self.art_rx.as_ref().map(|rx| rx.try_recv()) {
+            self.art_rx = None;
+            // Ignore a late answer for a song that is no longer playing.
+            if self.art_url.as_deref() == Some(url.as_str()) {
+                self.scheme.retarget(hue);
+            }
+        }
+        let dt = ctx.input(|input| input.stable_dt);
+        if self.scheme.step(dt) {
+            dynamic_color::install(self.scheme.current());
+            theme::apply(ctx);
+            ctx.request_repaint();
+        }
+    }
+
     fn start_stream(&mut self, track: &Track, stream: &Stream) {
         let result = self.ensure_player().and_then(|player| player.load_stream(stream));
         match result {
@@ -375,6 +453,9 @@ impl TweMusicApp {
                     self.state.tracks.push(track.clone());
                 }
                 self.state.play_track(track.id);
+                if self.state.adjacent_remote(true).is_none() {
+                    self.start_related(track);
+                }
                 self.position = None;
                 self.duration = None;
                 self.played_something = false;
@@ -689,8 +770,14 @@ impl TweMusicApp {
 
     fn render_home(&mut self, ui: &mut egui::Ui) {
         Self::page_title(ui, "Welcome back", "Find something lovely to listen to.");
-        Self::section_title(ui, "Quick picks");
-        let tracks = self.state.tracks.clone();
+        // Once something is playing, Home shows what comes next; until then, the quick picks.
+        let up_next = self.state.up_next(25);
+        let (heading, tracks) = if up_next.is_empty() {
+            ("Quick picks", self.state.tracks.clone())
+        } else {
+            ("Up next", up_next)
+        };
+        Self::section_title(ui, heading);
         ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| {
             for (index, track) in tracks.iter().enumerate() {
                 self.track_row(ui, track, index, tracks.len());
@@ -842,6 +929,16 @@ impl TweMusicApp {
                     ctx.set_theme(self.theme_pref);
                     theme::save_preference(self.theme_pref);
                 }
+                ui.add_space(12.0);
+                let mut dynamic_on = self.settings.dynamic_color;
+                if Self::switch_row(
+                    ui, &c, "Colours from album art",
+                    "Tint the whole app with the colours of the song that is playing.",
+                    &mut dynamic_on,
+                ) {
+                    self.settings.dynamic_color = dynamic_on;
+                    self.save_settings();
+                }
             });
             ui.add_space(12.0);
             m3::card(ui, CardKind::Filled, |ui| {
@@ -850,13 +947,13 @@ impl TweMusicApp {
                 let mut notifications_on = self.settings.notifications;
                 let mut tray_on = self.tray.is_some();
                 let mut changed = Self::switch_row(
-                    ui, c, "Track notifications",
+                    ui, &c, "Track notifications",
                     "Show the song when a new one starts while TweMusic is in the background.",
                     &mut notifications_on,
                 );
                 ui.add_space(12.0);
                 changed |= Self::switch_row(
-                    ui, c, "Keep playing in the tray",
+                    ui, &c, "Keep playing in the tray",
                     "Closing the window minimises it and shows a tray icon with controls. Quit from the tray menu.",
                     &mut tray_on,
                 );
@@ -1085,6 +1182,8 @@ impl eframe::App for TweMusicApp {
         self.poll_search();
         self.poll_media();
         self.poll_stream();
+        self.poll_related();
+        self.update_dynamic_color(ctx);
         self.poll_tray(ctx);
         self.handle_close(ctx);
         self.poll_import();
@@ -1094,13 +1193,13 @@ impl eframe::App for TweMusicApp {
         let size = WindowSize::from_width(ctx.screen_rect().width());
         let margin = size.margin();
 
-        self.render_top_bar(ctx, c, margin);
+        self.render_top_bar(ctx, &c, margin);
         if size == WindowSize::Compact {
-            self.render_nav_bar(ctx, c);
+            self.render_nav_bar(ctx, &c);
         } else {
-            self.render_nav_rail(ctx, c);
+            self.render_nav_rail(ctx, &c);
         }
-        self.render_player(ctx, c, margin);
+        self.render_player(ctx, &c, margin);
 
         let content_rect = ctx.available_rect();
         CentralPanel::default()

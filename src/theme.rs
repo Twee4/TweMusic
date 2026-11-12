@@ -4,7 +4,7 @@
 //! Colours are the Material 3 baseline scheme (seed #6750A4). Every "on-X" role is meant
 //! to be drawn on its "X" role; the tests below check that these pairs stay readable.
 
-use std::path::PathBuf;
+use std::{path::PathBuf, sync::RwLock};
 
 use eframe::egui::{
     self, Color32, Context, FontId, RichText, Rounding, Shadow, Stroke, Style, TextStyle, Theme,
@@ -115,18 +115,58 @@ pub const LIGHT: ColorScheme = ColorScheme {
     surface_container_highest: hex(0xE6E0E9),
 };
 
-pub fn colors_for(dark: bool) -> &'static ColorScheme {
-    if dark { &DARK } else { &LIGHT }
+/// Schemes derived from the album art (light, dark), when dynamic colour is active.
+static DYNAMIC: RwLock<Option<(ColorScheme, ColorScheme)>> = RwLock::new(None);
+
+/// Replaces the baseline schemes with `pair` (light, dark), or restores them with `None`.
+/// Call `apply` afterwards so egui's own widgets pick the colours up too.
+pub fn set_dynamic(pair: Option<(ColorScheme, ColorScheme)>) {
+    if let Ok(mut slot) = DYNAMIC.write() {
+        *slot = pair;
+    }
+}
+
+/// The colour scheme in use for light or dark mode.
+pub fn colors_for(dark: bool) -> ColorScheme {
+    let dynamic = DYNAMIC.read().ok().and_then(|slot| *slot);
+    match (dynamic, dark) {
+        (Some((_, dark_scheme)), true) => dark_scheme,
+        (Some((light_scheme, _)), false) => light_scheme,
+        (None, true) => DARK,
+        (None, false) => LIGHT,
+    }
 }
 
 /// The colour scheme for the theme `ui` is currently drawn in.
-pub fn colors(ui: &egui::Ui) -> &'static ColorScheme {
+pub fn colors(ui: &egui::Ui) -> ColorScheme {
     colors_for(ui.visuals().dark_mode)
 }
 
 /// Same, for code that only has the context.
-pub fn colors_ctx(ctx: &Context) -> &'static ColorScheme {
+pub fn colors_ctx(ctx: &Context) -> ColorScheme {
     colors_for(ctx.style().visuals.dark_mode)
+}
+
+impl ColorScheme {
+    /// This scheme blended towards `other` by `t` (0 = this, 1 = other), role by role.
+    pub fn mix(&self, other: &ColorScheme, t: f32) -> ColorScheme {
+        let t = t.clamp(0.0, 1.0);
+        macro_rules! mixed {
+            ($($field:ident),* $(,)?) => {
+                ColorScheme { $($field: blend(self.$field, other.$field, t)),* }
+            };
+        }
+        mixed!(
+            primary, on_primary, primary_container, on_primary_container,
+            secondary, on_secondary, secondary_container, on_secondary_container,
+            tertiary, on_tertiary, tertiary_container, on_tertiary_container,
+            error, on_error, error_container, on_error_container,
+            surface, on_surface, surface_variant, on_surface_variant,
+            outline, outline_variant, inverse_surface, inverse_on_surface, inverse_primary,
+            surface_container_lowest, surface_container_low, surface_container,
+            surface_container_high, surface_container_highest,
+        )
+    }
 }
 
 /// A translucent copy of `color`, used for state layers drawn on top of a container.
@@ -328,7 +368,7 @@ pub fn apply(ctx: &Context) {
 
 fn configure(style: &mut Style, dark: bool) {
     let c = colors_for(dark);
-    style.visuals = visuals(c, dark);
+    style.visuals = visuals(&c, dark);
     style.spacing.item_spacing = vec2(8.0, 8.0);
     style.spacing.button_padding = vec2(16.0, 8.0);
     style.spacing.interact_size = vec2(40.0, 40.0);

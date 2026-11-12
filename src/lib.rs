@@ -1,3 +1,4 @@
+pub mod dynamic_color;
 pub mod icons;
 pub mod import;
 pub mod library;

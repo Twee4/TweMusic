@@ -11,3 +11,10 @@ pub fn search_tracks(query: &str) -> Result<Vec<Track>, String> {
         .map(|tracks| tracks.into_iter().map(Track::from).collect())
         .map_err(|error| error.to_string())
 }
+
+/// Songs similar to `video_id` (YouTube Music's radio), for the "Up next" queue.
+pub fn related_tracks(video_id: &str) -> Result<Vec<Track>, String> {
+    twe_innertube::related::up_next(video_id)
+        .map(|tracks| tracks.into_iter().map(Track::from).collect())
+        .map_err(|error| error.to_string())
+}
