@@ -159,10 +159,87 @@ pub mod shape {
     pub const MEDIUM: f32 = 12.0;
     pub const LARGE: f32 = 16.0;
     pub const EXTRA_LARGE: f32 = 28.0;
+    // Material 3 Expressive additions.
+    pub const LARGE_INCREASED: f32 = 20.0;
+    pub const EXTRA_LARGE_INCREASED: f32 = 32.0;
+    pub const EXTRA_EXTRA_LARGE: f32 = 48.0;
 
     /// Fully rounded ("stadium") corners. egui clamps this to half the shorter side.
     pub fn full() -> Rounding {
         Rounding::same(1000.0)
+    }
+}
+
+/// Material 3 Expressive motion: components move on springs instead of fixed-time curves,
+/// so shapes and positions can overshoot slightly and settle.
+pub mod motion {
+    #[derive(Debug, Clone, Copy, PartialEq)]
+    pub struct Spring {
+        pub stiffness: f32,
+        pub damping_ratio: f32,
+    }
+
+    /// Spatial springs move things (position, size, shape); they overshoot a little.
+    pub const SPATIAL_FAST: Spring = Spring { stiffness: 1400.0, damping_ratio: 0.9 };
+    pub const SPATIAL_DEFAULT: Spring = Spring { stiffness: 700.0, damping_ratio: 0.9 };
+    pub const SPATIAL_SLOW: Spring = Spring { stiffness: 300.0, damping_ratio: 0.9 };
+    /// Effects springs change colour and opacity; they never overshoot.
+    pub const EFFECTS_FAST: Spring = Spring { stiffness: 3800.0, damping_ratio: 1.0 };
+    pub const EFFECTS_DEFAULT: Spring = Spring { stiffness: 1600.0, damping_ratio: 1.0 };
+
+    /// Advances a unit-mass spring by `dt` seconds towards `target`; returns the new
+    /// `(value, velocity)`. Integrated in small steps so it stays stable at any frame rate.
+    pub fn step(spring: Spring, value: f32, velocity: f32, target: f32, dt: f32) -> (f32, f32) {
+        let dt = dt.clamp(0.0, 0.05);
+        let damping = 2.0 * spring.damping_ratio * spring.stiffness.sqrt();
+        let steps = ((dt / 0.004).ceil() as u32).max(1);
+        let h = dt / steps as f32;
+        let (mut x, mut v) = (value, velocity);
+        for _ in 0..steps {
+            let acceleration = -spring.stiffness * (x - target) - damping * v;
+            v += acceleration * h;
+            x += v * h;
+        }
+        (x, v)
+    }
+
+    pub fn settled(value: f32, velocity: f32, target: f32) -> bool {
+        (value - target).abs() < 0.001 && velocity.abs() < 0.01
+    }
+
+    #[cfg(test)]
+    mod tests {
+        use super::*;
+
+        fn run(spring: Spring, target: f32, seconds: f32) -> (f32, f32, f32) {
+            let (mut value, mut velocity, mut peak) = (0.0_f32, 0.0_f32, 0.0_f32);
+            let frames = (seconds * 60.0) as u32;
+            for _ in 0..frames {
+                (value, velocity) = step(spring, value, velocity, target, 1.0 / 60.0);
+                peak = peak.max(value);
+            }
+            (value, velocity, peak)
+        }
+
+        #[test]
+        fn springs_settle_on_the_target() {
+            for spring in [SPATIAL_FAST, SPATIAL_DEFAULT, SPATIAL_SLOW, EFFECTS_FAST, EFFECTS_DEFAULT] {
+                let (value, velocity, _) = run(spring, 1.0, 4.0);
+                assert!(settled(value, velocity, 1.0), "{spring:?} ended at {value}");
+            }
+        }
+
+        #[test]
+        fn spatial_springs_overshoot_and_effects_springs_do_not() {
+            assert!(run(SPATIAL_DEFAULT, 1.0, 2.0).2 > 1.0);
+            assert!(run(EFFECTS_DEFAULT, 1.0, 2.0).2 <= 1.001);
+        }
+
+        #[test]
+        fn a_huge_frame_time_does_not_blow_up() {
+            let (value, velocity) = step(SPATIAL_FAST, 0.0, 0.0, 1.0, 10.0);
+            assert!(value.is_finite() && velocity.is_finite() && value.abs() < 5.0);
+        }
     }
 }
 
