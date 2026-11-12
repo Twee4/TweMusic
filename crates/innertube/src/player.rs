@@ -5,6 +5,8 @@
 //! plain stream URLs without signature or throttling challenges. The client profiles come
 //! from `clients.json` and are tried in turn, because YouTube changes which ones work.
 
+use std::{sync::Mutex, time::{Duration, Instant}};
+
 use serde_json::{json, Value};
 
 use crate::{
@@ -104,7 +106,7 @@ pub fn resolve_with(video_id: &str, profiles: &[ClientProfile]) -> Result<Stream
         return Err(InnerTubeError::Api("YouTube returned an invalid video ID.".to_owned()));
     }
     let http = transport::http_client()?;
-    let visitor_data = transport::fetch_visitor_page(&http).and_then(|page| find_visitor_data(&page));
+    let visitor_data = cached_visitor_data(&http);
 
     // Profiles that need signature deciphering are skipped: this crate can't do that yet.
     let usable = clients::eligible(profiles, "player");
@@ -125,7 +127,42 @@ pub fn resolve_with(video_id: &str, profiles: &[ClientProfile]) -> Result<Stream
             Err(error) => failures.push((format!("{} {}", client.name, client.client_version), error)),
         }
     }
-    Err(summarize_failures(failures))
+    let error = summarize_failures(failures);
+    if matches!(error, InnerTubeError::BotCheck) {
+        // The visitor ID may be the flagged part: get a fresh one next time.
+        forget_visitor_data();
+    }
+    Err(error)
+}
+
+/// How long a visitor ID is reused. One page load per hour instead of one per track keeps the
+/// request pattern closer to a real client's and saves a round trip on every song.
+const VISITOR_TTL: Duration = Duration::from_secs(60 * 60);
+static VISITOR: Mutex<Option<(String, Instant)>> = Mutex::new(None);
+
+fn cached_visitor_data(http: &reqwest::blocking::Client) -> Option<String> {
+    if let Ok(slot) = VISITOR.lock() {
+        if let Some((visitor, fetched)) = slot.as_ref() {
+            if fetched.elapsed() < VISITOR_TTL {
+                return Some(visitor.clone());
+            }
+        }
+    }
+    let fresh = transport::fetch_visitor_page(http).and_then(|page| find_visitor_data(&page))?;
+    if let Ok(mut slot) = VISITOR.lock() {
+        *slot = Some((fresh.clone(), Instant::now()));
+    }
+    Some(fresh)
+}
+
+fn forget_visitor_data() {
+    if let Ok(mut slot) = VISITOR.lock() {
+        *slot = None;
+    }
+}
+
+fn is_bot_check(error: &InnerTubeError) -> bool {
+    matches!(error, InnerTubeError::Refused(message) if message.to_ascii_lowercase().contains("not a bot"))
 }
 
 /// Explains why every client failed: a network problem if none of them got an answer,
@@ -133,6 +170,12 @@ pub fn resolve_with(video_id: &str, profiles: &[ClientProfile]) -> Result<Stream
 pub fn summarize_failures(failures: Vec<(String, InnerTubeError)>) -> InnerTubeError {
     if !failures.is_empty() && failures.iter().all(|(_, error)| matches!(error, InnerTubeError::Http(_))) {
         return InnerTubeError::Unreachable;
+    }
+    // Every client that answered said "prove you are not a bot": that is the connection's
+    // reputation, not something one profile can fix, so say so plainly.
+    let answered: Vec<_> = failures.iter().filter(|(_, error)| !matches!(error, InnerTubeError::Http(_))).collect();
+    if !answered.is_empty() && answered.iter().all(|(_, error)| is_bot_check(error)) {
+        return InnerTubeError::BotCheck;
     }
     let detail = failures
         .iter()
@@ -194,6 +237,19 @@ mod tests {
             summarize_failures(vec![("A 1".to_owned(), InnerTubeError::NoFormat)]),
             InnerTubeError::Api(_)
         ));
+    }
+
+    #[test]
+    fn recognises_the_bot_check() {
+        let bot = |label: &str| (
+            label.to_owned(),
+            InnerTubeError::Refused("LOGIN_REQUIRED: Sign in to confirm you're not a bot".to_owned()),
+        );
+        assert!(matches!(summarize_failures(vec![bot("A 1"), bot("B 2")]), InnerTubeError::BotCheck));
+        // One client giving a different answer means it is not (only) the bot check.
+        let age = ("C 3".to_owned(), InnerTubeError::Refused("LOGIN_REQUIRED: Sign in to confirm your age".to_owned()));
+        assert!(matches!(summarize_failures(vec![bot("A 1"), age]), InnerTubeError::Api(_)));
+        assert!(summarize_failures(vec![bot("A 1")]).to_string().contains("network address"));
     }
 
     #[test]
