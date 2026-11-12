@@ -79,6 +79,9 @@ struct TweMusicApp {
     stream_rx: Option<Receiver<Result<Stream, String>>>,
     /// The track whose stream is being resolved.
     pending_track: Option<Track>,
+    related_rx: Option<Receiver<Result<Vec<Track>, String>>>,
+    /// The track the Up next list was last requested for, so it is fetched once per track.
+    related_for: Option<TrackId>,
     last_poll: Instant,
     position: Option<f64>,
     duration: Option<f64>,
@@ -126,7 +129,7 @@ impl TweMusicApp {
         let mut app = Self {
             state: AppState::new(), search_rx: None, search_in_flight: false,
             mpv: None, local_file_path: String::new(), player_message: None, snackbar: None,
-            ctx: ctx.clone(), stream_rx: None, pending_track: None, last_poll: Instant::now(), position: None, duration: None,
+            ctx: ctx.clone(), stream_rx: None, pending_track: None, related_rx: None, related_for: None, last_poll: Instant::now(), position: None, duration: None,
             played_something: false, loading_since: None,
             library, library_path, selected_playlist: 0, new_playlist_name: String::new(),
             import_url: String::new(), import_rx: None,
@@ -367,6 +370,36 @@ impl TweMusicApp {
         }
     }
 
+    /// Fetches songs similar to `track` in the background and queues them after it.
+    fn start_related(&mut self, track: &Track) {
+        let Some(video_id) = track.video_id.clone() else { return; };
+        if self.related_for == Some(track.id) {
+            return;
+        }
+        self.related_for = Some(track.id);
+        let (tx, rx) = mpsc::channel();
+        let wake = self.ctx.clone();
+        thread::spawn(move || {
+            let _ = tx.send(ytmusic::related_tracks(&video_id));
+            wake.request_repaint();
+        });
+        self.related_rx = Some(rx);
+    }
+
+    fn poll_related(&mut self) {
+        let Some(rx) = &self.related_rx else { return; };
+        let result = match rx.try_recv() {
+            Ok(result) => result,
+            Err(TryRecvError::Empty) => return,
+            Err(TryRecvError::Disconnected) => Ok(Vec::new()),
+        };
+        self.related_rx = None;
+        // A failed lookup is not worth interrupting playback for; the queue just stays as it is.
+        if let Ok(tracks) = result {
+            self.state.append_to_queue(tracks);
+        }
+    }
+
     fn start_stream(&mut self, track: &Track, stream: &Stream) {
         let result = self.ensure_player().and_then(|player| player.load_stream(stream));
         match result {
@@ -375,6 +408,9 @@ impl TweMusicApp {
                     self.state.tracks.push(track.clone());
                 }
                 self.state.play_track(track.id);
+                if self.state.adjacent_remote(true).is_none() {
+                    self.start_related(track);
+                }
                 self.position = None;
                 self.duration = None;
                 self.played_something = false;
@@ -689,8 +725,14 @@ impl TweMusicApp {
 
     fn render_home(&mut self, ui: &mut egui::Ui) {
         Self::page_title(ui, "Welcome back", "Find something lovely to listen to.");
-        Self::section_title(ui, "Quick picks");
-        let tracks = self.state.tracks.clone();
+        // Once something is playing, Home shows what comes next; until then, the quick picks.
+        let up_next = self.state.up_next(25);
+        let (heading, tracks) = if up_next.is_empty() {
+            ("Quick picks", self.state.tracks.clone())
+        } else {
+            ("Up next", up_next)
+        };
+        Self::section_title(ui, heading);
         ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| {
             for (index, track) in tracks.iter().enumerate() {
                 self.track_row(ui, track, index, tracks.len());
@@ -1085,6 +1127,7 @@ impl eframe::App for TweMusicApp {
         self.poll_search();
         self.poll_media();
         self.poll_stream();
+        self.poll_related();
         self.poll_tray(ctx);
         self.handle_close(ctx);
         self.poll_import();

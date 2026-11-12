@@ -7,6 +7,7 @@ pub mod ids;
 pub mod models;
 pub mod parse;
 pub mod player;
+pub mod related;
 pub mod search;
 pub mod transport;
 
