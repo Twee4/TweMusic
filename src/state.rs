@@ -101,6 +101,37 @@ impl AppState {
         self.queue.first().copied()
     }
 
+    /// Adds tracks to the end of the queue, skipping ones already queued. Returns how many
+    /// were added.
+    pub fn append_to_queue(&mut self, tracks: Vec<Track>) -> usize {
+        let mut added = 0;
+        for track in tracks {
+            if self.queue.contains(&track.id) {
+                continue;
+            }
+            self.queue.push(track.id);
+            if !self.tracks.iter().any(|existing| existing.id == track.id) {
+                self.tracks.push(track);
+            }
+            added += 1;
+        }
+        added
+    }
+
+    /// The YouTube tracks queued after the current one (at most `limit`), for the Up next list.
+    pub fn up_next(&self, limit: usize) -> Vec<Track> {
+        let Some(index) = self.current_track.and_then(|id| self.queue.iter().position(|queued| *queued == id)) else {
+            return Vec::new();
+        };
+        self.queue
+            .iter()
+            .skip(index + 1)
+            .filter_map(|id| self.tracks.iter().find(|track| track.id == *id && track.video_id.is_some()))
+            .take(limit)
+            .cloned()
+            .collect()
+    }
+
     /// The nearest queued YouTube track before or after the current one, skipping demo tracks.
     pub fn adjacent_remote(&self, forward: bool) -> Option<TrackId> {
         let index = self.current_track.and_then(|id| self.queue.iter().position(|queued| *queued == id))?;
@@ -177,6 +208,24 @@ mod tests {
         assert_eq!(state.set_queue(vec![track]), Some(TrackId(300)));
         assert_eq!(state.queue, vec![TrackId(300)]);
         assert!(state.tracks.iter().any(|existing| existing.id == TrackId(300)));
+    }
+
+    #[test]
+    fn append_to_queue_skips_duplicates_and_feeds_up_next() {
+        let mut state = AppState::new();
+        let remote = |id: u64, video: &str| {
+            let mut track = Track::new(id, "T", "A", None, 10);
+            track.video_id = Some(video.to_owned());
+            track
+        };
+        state.set_queue(vec![remote(100, "aaaaaaaaaaa")]);
+        state.play_track(TrackId(100));
+        assert!(state.up_next(10).is_empty());
+        assert_eq!(state.append_to_queue(vec![remote(200, "bbbbbbbbbbb"), remote(100, "aaaaaaaaaaa"), remote(300, "ccccccccccc")]), 2);
+        assert_eq!(state.adjacent_remote(true), Some(TrackId(200)));
+        let upcoming: Vec<u64> = state.up_next(10).iter().map(|track| track.id.0).collect();
+        assert_eq!(upcoming, vec![200, 300]);
+        assert_eq!(state.up_next(1).len(), 1);
     }
 
     #[test]

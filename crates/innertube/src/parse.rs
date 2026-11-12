@@ -192,6 +192,79 @@ pub fn collect_search_tracks(value: &Value) -> Vec<TrackInfo> {
     tracks
 }
 
+/// Parses an "up next" queue entry (`playlistPanelVideoRenderer`): the byline is
+/// "artist • album • year" and the duration is in `lengthText`.
+fn parse_panel_item(renderer: &Value, seen: &mut HashSet<String>) -> Option<TrackInfo> {
+    let video_id = renderer
+        .get("videoId")
+        .and_then(Value::as_str)
+        .filter(|id| youtube_music_url(id).is_some())?;
+    let title = renderer.get("title").and_then(text_field).map(|text| text.trim().to_owned()).filter(|text| !text.is_empty())?;
+    if !seen.insert(video_id.to_owned()) {
+        return None;
+    }
+    let mut groups: Vec<String> = vec![String::new()];
+    if let Some(runs) = renderer.pointer("/longBylineText/runs").and_then(Value::as_array) {
+        for run in runs {
+            let text = run.get("text").and_then(Value::as_str).unwrap_or_default();
+            if text.trim() == "•" {
+                groups.push(String::new());
+            } else if let Some(group) = groups.last_mut() {
+                group.push_str(text);
+            }
+        }
+    }
+    let artist = groups
+        .first()
+        .map(|group| group.trim().to_owned())
+        .filter(|group| !group.is_empty())
+        .unwrap_or_else(|| "Unknown artist".to_owned());
+    // The third group is usually the release year, which is not an album name.
+    let album = groups
+        .get(1)
+        .map(|group| group.trim().to_owned())
+        .filter(|group| !group.is_empty() && !group.chars().all(|ch| ch.is_ascii_digit()));
+    let duration_secs = renderer
+        .get("lengthText")
+        .and_then(text_field)
+        .and_then(|text| parse_duration(text.trim()))
+        .unwrap_or_default();
+
+    Some(TrackInfo {
+        video_id: video_id.to_owned(),
+        title,
+        artist,
+        album,
+        duration_secs,
+        thumbnail_url: renderer.pointer("/thumbnail/thumbnails").and_then(best_thumbnail),
+    })
+}
+
+/// Collects the "up next" queue entries anywhere in a `next` response.
+pub fn collect_queue_tracks(value: &Value) -> Vec<TrackInfo> {
+    fn walk(value: &Value, tracks: &mut Vec<TrackInfo>, seen: &mut HashSet<String>) {
+        match value {
+            Value::Object(object) => {
+                if let Some(track) = object.get("playlistPanelVideoRenderer").and_then(|renderer| parse_panel_item(renderer, seen)) {
+                    tracks.push(track);
+                }
+                for child in object.values() {
+                    walk(child, tracks, seen);
+                }
+            }
+            Value::Array(items) => {
+                for child in items {
+                    walk(child, tracks, seen);
+                }
+            }
+            _ => {}
+        }
+    }
+    let mut tracks = Vec::new();
+    walk(value, &mut tracks, &mut HashSet::new());
+    tracks
+}
+
 /// Collects every playlist row anywhere in a browse response, skipping IDs already in `seen`.
 pub fn collect_playlist_tracks(value: &Value, seen: &mut HashSet<String>) -> Vec<TrackInfo> {
     fn walk(value: &Value, tracks: &mut Vec<TrackInfo>, seen: &mut HashSet<String>) {
@@ -353,6 +426,37 @@ mod tests {
         );
         assert_eq!(tracks[1].album, None);
         assert_eq!(tracks[1].duration_secs, 59);
+    }
+
+    fn panel_item(video_id: &str, title: &str, byline: &[&str], length: &str) -> Value {
+        let runs: Vec<Value> = byline.iter().map(|text| json!({ "text": text })).collect();
+        json!({ "playlistPanelVideoRenderer": {
+            "videoId": video_id,
+            "title": { "runs": [{ "text": title }] },
+            "longBylineText": { "runs": runs },
+            "lengthText": { "runs": [{ "text": length }] },
+            "thumbnail": { "thumbnails": [ { "url": "https://i.ytimg.com/vi/abc123_XYZ0/sddefault.jpg" } ] }
+        } })
+    }
+
+    #[test]
+    fn parses_up_next_entries() {
+        let response = json!({ "contents": { "playlistPanelRenderer": { "contents": [
+            panel_item("abc123_XYZ0", "Seed", &["Band", " • ", "Album", " • ", "2020"], "3:42"),
+            panel_item("def456-UVW1", "Related", &["Other", " • ", "2019"], "4:01"),
+            panel_item("abc123_XYZ0", "Duplicate", &["Band"], "1:00"),
+            panel_item("bad id", "Rejected", &["Band"], "1:00"),
+            { "automixPreviewVideoRenderer": { "content": {} } },
+        ] } } });
+        let tracks = collect_queue_tracks(&response);
+        assert_eq!(tracks.len(), 2);
+        assert_eq!(tracks[0].album.as_deref(), Some("Album"));
+        assert_eq!(tracks[0].duration_secs, 222);
+        assert_eq!(tracks[1].title, "Related");
+        assert_eq!(tracks[1].artist, "Other");
+        assert_eq!(tracks[1].album, None); // "2019" is a year, not an album
+        assert_eq!(tracks[1].duration_secs, 241);
+        assert!(tracks[1].thumbnail_url.is_some());
     }
 
     #[test]
