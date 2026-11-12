@@ -26,6 +26,9 @@ pub enum InnerTubeError {
     /// Reserved for signature / throttling deciphering, which is not implemented yet.
     #[error("Could not decipher the stream address.")]
     CipherFailed,
+    /// Every attempt failed before YouTube answered (no connection, DNS, timeout).
+    #[error("Could not reach YouTube. Check your internet connection.")]
+    Unreachable,
     #[error("{0}")]
     Api(String),
 }

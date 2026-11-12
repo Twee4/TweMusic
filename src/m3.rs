@@ -6,13 +6,34 @@
 
 use eframe::egui::{
     self, pos2, vec2, Align, Align2, Color32, CursorIcon, Frame, InnerResponse, Layout, Margin,
-    Rect, Response, Rounding, Sense, Stroke, Ui, UiBuilder, Vec2,
+    Pos2, Rect, Response, Rounding, Sense, Stroke, Ui, UiBuilder, Vec2,
 };
 
 use crate::{
     icons::{self, Icon},
-    theme::{self, shape, state, with_alpha, Role},
+    theme::{self, motion, shape, state, with_alpha, Role},
 };
+
+/// An animated value that follows `target` on a spring (Material 3 Expressive motion).
+/// The value is remembered per `id`; it starts at the target, so nothing animates on the
+/// first frame. Keeps the UI repainting until it has settled.
+pub fn spring(ui: &Ui, id: egui::Id, target: f32, spring: motion::Spring) -> f32 {
+    let ctx = ui.ctx();
+    let (value, velocity) = ctx.data_mut(|data| data.get_temp::<(f32, f32)>(id)).unwrap_or((target, 0.0));
+    let (next, next_velocity) = motion::step(spring, value, velocity, target, ctx.input(|input| input.stable_dt));
+    let (next, next_velocity) = if motion::settled(next, next_velocity, target) {
+        (target, 0.0)
+    } else {
+        ctx.request_repaint();
+        (next, next_velocity)
+    };
+    ctx.data_mut(|data| data.insert_temp(id, (next, next_velocity)));
+    next
+}
+
+fn lerp(from: f32, to: f32, t: f32) -> f32 {
+    from + (to - from) * t
+}
 
 /// Paints the hover / focus / pressed overlay for a component. `content` is the colour the
 /// component draws its label or icon in, which is also the state layer colour.
@@ -82,7 +103,9 @@ pub fn button_enabled(ui: &mut Ui, kind: ButtonKind, label: &str, enabled: bool)
     let (rect, response) = ui.allocate_exact_size(vec2(width, 40.0), sense);
 
     if ui.is_rect_visible(rect) {
-        let rounding = shape::full();
+        // Expressive: a fully round button squares off while it is pressed.
+        let pressed = spring(ui, response.id.with("press"), f32::from(u8::from(response.is_pointer_button_down_on() && enabled)), motion::SPATIAL_FAST);
+        let rounding = Rounding::same(lerp(20.0, 12.0, pressed).max(0.0));
         let painter = ui.painter();
         if let Some(fill) = container {
             painter.rect_filled(rect, rounding, fill);
@@ -140,11 +163,18 @@ pub fn icon_button_ex(
     let sense = if enabled { Sense::click() } else { Sense::hover() };
     let (rect, response) = ui.allocate_exact_size(vec2(size, size), sense);
     if ui.is_rect_visible(rect) {
+        // Expressive shape morphing: round when off, a rounded square when selected, and
+        // squarer again while pressed. Standard icon buttons only morph on press.
+        let toggled = if kind == IconButtonKind::Standard { 0.0 } else { f32::from(u8::from(selected)) };
+        let on = spring(ui, response.id.with("on"), toggled, motion::SPATIAL_DEFAULT);
+        let pressed = spring(ui, response.id.with("press"), f32::from(u8::from(response.is_pointer_button_down_on() && enabled)), motion::SPATIAL_FAST);
+        let radius = lerp(lerp(size / 2.0, size * 0.32, on), size * 0.22, pressed).max(0.0);
+        let rounding = Rounding::same(radius);
         let painter = ui.painter();
         if let Some(fill) = container {
-            painter.circle_filled(rect.center(), size / 2.0, fill);
+            painter.rect_filled(rect, rounding, fill);
         }
-        state_layer(ui, rect, Rounding::same(size / 2.0), &response, content, enabled);
+        state_layer(ui, rect, rounding, &response, content, enabled);
         let icon_size = if size >= 40.0 { 24.0 } else { size * 0.6 };
         icon.paint(painter, rect.center(), icon_size, content, selected);
     }
@@ -186,7 +216,9 @@ pub fn filter_chip(ui: &mut Ui, label: &str, selected: bool) -> Response {
     pointer_cursor(response, true)
 }
 
-/// A single-select segmented button row. Returns the index that was clicked, if any.
+/// A single-select connected button group (Material 3 Expressive): segments sit 2dp apart,
+/// the outer ends are round, and the selected segment morphs into a full pill.
+/// Returns the index that was clicked, if any.
 pub fn segmented(ui: &mut Ui, labels: &[&str], selected: usize) -> Option<usize> {
     let c = theme::colors(ui);
     let widest = labels
@@ -198,44 +230,35 @@ pub fn segmented(ui: &mut Ui, labels: &[&str], selected: usize) -> Option<usize>
                 .x
         })
         .fold(0.0_f32, f32::max);
-    // Room for the check mark is reserved in every segment so selecting one never shifts the row.
-    let segment_width = widest + 24.0 + 26.0;
+    let segment_width = widest + 40.0;
     let mut clicked = None;
     ui.horizontal(|ui| {
-        ui.spacing_mut().item_spacing.x = 0.0;
+        ui.spacing_mut().item_spacing.x = 2.0;
         for (index, label) in labels.iter().enumerate() {
             let is_selected = index == selected;
-            let (content, fill) = if is_selected {
-                (c.on_secondary_container, Some(c.secondary_container))
-            } else {
-                (c.on_surface, None)
-            };
             let (rect, response) = ui.allocate_exact_size(vec2(segment_width, 40.0), Sense::click());
             if ui.is_rect_visible(rect) {
-                let radius = 20.0;
+                let on = spring(ui, response.id.with("on"), f32::from(u8::from(is_selected)), motion::SPATIAL_DEFAULT);
+                let pressed = spring(ui, response.id.with("press"), f32::from(u8::from(response.is_pointer_button_down_on())), motion::SPATIAL_FAST);
+                let (content, fill) = if is_selected {
+                    (c.on_primary, c.primary)
+                } else {
+                    (c.on_secondary_container, c.secondary_container)
+                };
+                let inner = lerp(lerp(6.0, 20.0, on), 10.0, pressed).max(0.0);
                 let first = index == 0;
                 let last = index + 1 == labels.len();
                 let rounding = Rounding {
-                    nw: if first { radius } else { 0.0 },
-                    sw: if first { radius } else { 0.0 },
-                    ne: if last { radius } else { 0.0 },
-                    se: if last { radius } else { 0.0 },
+                    nw: if first { 20.0 } else { inner },
+                    sw: if first { 20.0 } else { inner },
+                    ne: if last { 20.0 } else { inner },
+                    se: if last { 20.0 } else { inner },
                 };
                 let painter = ui.painter();
-                if let Some(fill) = fill {
-                    painter.rect_filled(rect, rounding, fill);
-                }
-                painter.rect_stroke(rect, rounding, Stroke::new(1.0_f32, c.outline));
+                painter.rect_filled(rect, rounding, fill);
                 state_layer(ui, rect, rounding, &response, content, true);
-
                 let galley = painter.layout_no_wrap((*label).to_owned(), Role::LabelLarge.font(), content);
-                let group_width = galley.size().x + if is_selected { 26.0 } else { 0.0 };
-                let left = rect.center().x - group_width / 2.0;
-                if is_selected {
-                    icons::paint_check(painter, pos2(left + 9.0, rect.center().y), 18.0, content);
-                }
-                let text_x = left + if is_selected { 26.0 } else { 0.0 };
-                painter.galley(pos2(text_x, rect.center().y - galley.size().y / 2.0), galley, content);
+                painter.galley(rect.center() - galley.size() / 2.0, galley, content);
             }
             if pointer_cursor(response, true).clicked() {
                 clicked = Some(index);
@@ -257,16 +280,16 @@ pub enum CardKind {
 /// A card that spans the available width. Elevation is expressed with tonal surface colours.
 pub fn card<R>(ui: &mut Ui, kind: CardKind, add_contents: impl FnOnce(&mut Ui) -> R) -> InnerResponse<R> {
     let c = theme::colors(ui);
-    let (fill, stroke) = match kind {
-        CardKind::Filled => (c.surface_container_highest, Stroke::NONE),
-        CardKind::Elevated => (c.surface_container_low, Stroke::NONE),
-        CardKind::Outlined => (c.surface, Stroke::new(1.0_f32, c.outline_variant)),
+    let (fill, stroke, radius) = match kind {
+        CardKind::Filled => (c.surface_container_high, Stroke::NONE, shape::EXTRA_LARGE),
+        CardKind::Elevated => (c.surface_container_low, Stroke::NONE, shape::LARGE_INCREASED),
+        CardKind::Outlined => (c.surface, Stroke::new(1.0_f32, c.outline_variant), shape::LARGE_INCREASED),
     };
     Frame::none()
         .fill(fill)
         .stroke(stroke)
-        .rounding(Rounding::same(shape::MEDIUM))
-        .inner_margin(Margin::same(16.0))
+        .rounding(Rounding::same(radius))
+        .inner_margin(Margin::same(20.0))
         .show(ui, |ui| {
             ui.set_width(ui.available_width());
             add_contents(ui)
@@ -355,9 +378,12 @@ fn nav_item(
         vec2(indicator_width, 32.0),
     );
     let rounding = shape::full();
+    // Expressive: the selection indicator springs open from the centre of the icon.
+    let open = spring(ui, response.id.with("indicator"), f32::from(u8::from(selected)), motion::SPATIAL_DEFAULT);
     let painter = ui.painter();
-    if selected {
-        painter.rect_filled(indicator, rounding, c.secondary_container);
+    if open > 0.01 {
+        let width = (indicator_width * open).max(0.0);
+        painter.rect_filled(Rect::from_center_size(indicator.center(), vec2(width, 32.0)), rounding, c.secondary_container);
     }
     state_layer(ui, indicator, rounding, &response, c.on_surface, true);
 
@@ -405,6 +431,31 @@ pub fn seek_value(x: f32, left: f32, right: f32, max: f64) -> f64 {
 
 /// A Material 3 slider for seeking. Dragging only previews; the caller seeks on `Committed`.
 pub fn seek_bar(ui: &mut Ui, value: f64, max: f64, width: f32, enabled: bool) -> SeekEvent {
+    seek_bar_impl(ui, value, max, width, enabled, None)
+}
+
+/// The Material 3 Expressive seek slider: the played part is a wave that moves while
+/// `playing` and flattens when paused. Dragging only previews; seek on `Committed`.
+pub fn wavy_seek_bar(ui: &mut Ui, value: f64, max: f64, width: f32, enabled: bool, playing: bool) -> SeekEvent {
+    seek_bar_impl(ui, value, max, width, enabled, Some(playing))
+}
+
+/// Points of a horizontal sine wave from `left` to `right`, for the wavy progress track.
+pub fn wave_points(left: f32, right: f32, y: f32, amplitude: f32, wavelength: f32, phase: f32) -> Vec<Pos2> {
+    if right <= left {
+        return vec![pos2(left, y)];
+    }
+    let steps = (((right - left) / 2.0).ceil() as usize).max(1);
+    (0..=steps)
+        .map(|step| {
+            let x = left + (right - left) * step as f32 / steps as f32;
+            let angle = (x - left) / wavelength * std::f32::consts::TAU - phase;
+            pos2(x, y + amplitude * angle.sin())
+        })
+        .collect()
+}
+
+fn seek_bar_impl(ui: &mut Ui, value: f64, max: f64, width: f32, enabled: bool, wave: Option<bool>) -> SeekEvent {
     let c = theme::colors(ui);
     let usable = enabled && max > 0.0;
     let sense = if usable { Sense::click_and_drag() } else { Sense::hover() };
@@ -439,17 +490,55 @@ pub fn seek_bar(ui: &mut Ui, value: f64, max: f64, width: f32, enabled: bool) ->
         let painter = ui.painter();
 
         let inactive = if usable { c.secondary_container } else { with_alpha(c.on_surface, state::DISABLED_CONTAINER) };
-        painter.rect_filled(Rect::from_min_max(pos2(left, y - 2.0), pos2(right, y + 2.0)), Rounding::same(2.0), inactive);
-        if usable {
-            painter.rect_filled(
-                Rect::from_min_max(pos2(left, y - 2.0), pos2(handle_x.max(left), y + 2.0)),
-                Rounding::same(2.0),
-                c.primary,
-            );
-            if response.hovered() || response.dragged() {
-                painter.circle_filled(pos2(handle_x, y), 16.0, with_alpha(c.primary, 0.12));
+        match wave {
+            None => {
+                painter.rect_filled(Rect::from_min_max(pos2(left, y - 2.0), pos2(right, y + 2.0)), Rounding::same(2.0), inactive);
+                if usable {
+                    painter.rect_filled(
+                        Rect::from_min_max(pos2(left, y - 2.0), pos2(handle_x.max(left), y + 2.0)),
+                        Rounding::same(2.0),
+                        c.primary,
+                    );
+                    if response.hovered() || response.dragged() {
+                        painter.circle_filled(pos2(handle_x, y), 16.0, with_alpha(c.primary, 0.12));
+                    }
+                    painter.circle_filled(pos2(handle_x, y), 10.0, c.primary);
+                }
             }
-            painter.circle_filled(pos2(handle_x, y), 10.0, c.primary);
+            Some(playing) => {
+                // Handle: a 4dp bar with a 6dp gap either side (2dp wide while dragged).
+                let grabbed = spring(ui, response.id.with("grab"), f32::from(u8::from(response.dragged())), motion::SPATIAL_FAST);
+                let gap = 6.0;
+                let painter = ui.painter();
+                if usable {
+                    let flat_from = (handle_x + gap + 2.0).min(right);
+                    painter.rect_filled(
+                        Rect::from_min_max(pos2(flat_from, y - 2.0), pos2(right, y + 2.0)),
+                        Rounding::same(2.0),
+                        inactive,
+                    );
+                    let amplitude = spring(ui, response.id.with("wave"), if playing { 3.0 } else { 0.0 }, motion::SPATIAL_SLOW);
+                    let painter = ui.painter();
+                    let wave_end = (handle_x - gap - 2.0).max(left);
+                    let phase = (ui.input(|input| input.time) % 1.6) as f32 / 1.6 * std::f32::consts::TAU;
+                    if wave_end > left {
+                        let points = wave_points(left, wave_end, y, amplitude, 40.0, phase);
+                        painter.add(egui::Shape::line(points, Stroke::new(4.0_f32, c.primary)));
+                        painter.circle_filled(pos2(left, y + amplitude * (-phase).sin()), 2.0, c.primary);
+                    }
+                    if playing && amplitude > 0.01 {
+                        ui.ctx().request_repaint_after(std::time::Duration::from_millis(16));
+                    }
+                    let bar_width = lerp(4.0, 2.0, grabbed);
+                    painter.rect_filled(
+                        Rect::from_center_size(pos2(handle_x, y), vec2(bar_width, 20.0)),
+                        Rounding::same(2.0),
+                        c.primary,
+                    );
+                } else {
+                    painter.rect_filled(Rect::from_min_max(pos2(left, y - 2.0), pos2(right, y + 2.0)), Rounding::same(2.0), inactive);
+                }
+            }
         }
     }
     if usable { response.on_hover_cursor(CursorIcon::PointingHand); }
@@ -493,9 +582,97 @@ pub fn snackbar(ctx: &egui::Context, anchor: Rect, message: &str) {
         });
 }
 
+/// Corner radii for an item in a grouped list (Material 3 Expressive): the first and last
+/// items have large outer corners, everything between is nearly square, and a lone item is
+/// fully rounded.
+pub fn grouped_rounding(index: usize, count: usize) -> Rounding {
+    let (outer, inner) = (24.0, 6.0);
+    let top = if index == 0 { outer } else { inner };
+    let bottom = if index + 1 >= count { outer } else { inner };
+    Rounding { nw: top, ne: top, sw: bottom, se: bottom }
+}
+
+/// The large play / pause button (Material 3 Expressive "medium" FAB, 64dp). It is a circle
+/// while paused, morphs into a rounded square while playing, and squares off when pressed.
+pub fn play_button(ui: &mut Ui, playing: bool, tooltip: &str) -> Response {
+    let c = theme::colors(ui);
+    let size = 64.0;
+    let (rect, response) = ui.allocate_exact_size(vec2(size, size), Sense::click());
+    if ui.is_rect_visible(rect) {
+        let on = spring(ui, response.id.with("playing"), f32::from(u8::from(playing)), motion::SPATIAL_DEFAULT);
+        let pressed = spring(ui, response.id.with("press"), f32::from(u8::from(response.is_pointer_button_down_on())), motion::SPATIAL_FAST);
+        let radius = lerp(lerp(size / 2.0, 22.0, on), 14.0, pressed).max(0.0);
+        let rounding = Rounding::same(radius);
+        let painter = ui.painter();
+        painter.rect_filled(rect, rounding, c.primary_container);
+        state_layer(ui, rect, rounding, &response, c.on_primary_container, true);
+        let icon = if playing { Icon::Pause } else { Icon::Play };
+        icon.paint(painter, rect.center(), 32.0, c.on_primary_container, true);
+    }
+    pointer_cursor(response, true).on_hover_text(tooltip)
+}
+
+/// The indeterminate loading indicator: a soft star that rotates and breathes between a
+/// round blob and a pointier shape, in a round container.
+pub fn loading_indicator(ui: &mut Ui, size: f32) {
+    let c = theme::colors(ui);
+    let (rect, _) = ui.allocate_exact_size(vec2(size, size), Sense::hover());
+    if !ui.is_rect_visible(rect) {
+        return;
+    }
+    let time = ui.input(|input| input.time) as f32;
+    let painter = ui.painter();
+    painter.circle_filled(rect.center(), size / 2.0, c.secondary_container);
+    let radius = size * 0.30;
+    let depth = 0.10 + 0.10 * (0.5 + 0.5 * (time * 2.4).sin());
+    let rotation = time * 3.0;
+    let points: Vec<Pos2> = (0..60)
+        .map(|step| {
+            let angle = step as f32 / 60.0 * std::f32::consts::TAU;
+            let reach = radius * (1.0 + depth * (6.0 * (angle + rotation)).cos());
+            rect.center() + vec2(angle.cos(), angle.sin()) * reach
+        })
+        .collect();
+    let mut mesh = egui::Mesh::default();
+    mesh.colored_vertex(rect.center(), c.on_secondary_container);
+    for point in &points {
+        mesh.colored_vertex(*point, c.on_secondary_container);
+    }
+    let count = points.len() as u32;
+    for index in 0..count {
+        mesh.add_triangle(0, 1 + index, 1 + (index + 1) % count);
+    }
+    painter.add(egui::Shape::mesh(mesh));
+    ui.ctx().request_repaint_after(std::time::Duration::from_millis(16));
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn wave_points_span_the_range_and_flatten_at_zero_amplitude() {
+        let wave = wave_points(10.0, 110.0, 20.0, 3.0, 40.0, 0.0);
+        assert_eq!(wave.first().unwrap().x, 10.0);
+        assert_eq!(wave.last().unwrap().x, 110.0);
+        assert!(wave.iter().all(|point| (point.y - 20.0).abs() <= 3.0 + 1e-4));
+        assert!(wave.iter().any(|point| (point.y - 20.0).abs() > 2.0));
+        let flat = wave_points(10.0, 110.0, 20.0, 0.0, 40.0, 1.0);
+        assert!(flat.iter().all(|point| point.y == 20.0));
+        assert_eq!(wave_points(50.0, 50.0, 1.0, 3.0, 40.0, 0.0).len(), 1);
+    }
+
+    #[test]
+    fn grouped_rounding_rounds_only_the_ends() {
+        let only = grouped_rounding(0, 1);
+        assert_eq!((only.nw, only.sw), (24.0, 24.0));
+        let first = grouped_rounding(0, 3);
+        assert_eq!((first.nw, first.sw), (24.0, 6.0));
+        let middle = grouped_rounding(1, 3);
+        assert_eq!((middle.nw, middle.se), (6.0, 6.0));
+        let last = grouped_rounding(2, 3);
+        assert_eq!((last.nw, last.se), (6.0, 24.0));
+    }
 
     #[test]
     fn seek_value_maps_and_clamps() {

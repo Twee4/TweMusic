@@ -111,7 +111,7 @@ pub fn resolve_with(video_id: &str, profiles: &[ClientProfile]) -> Result<Stream
     if usable.is_empty() {
         return Err(InnerTubeError::Api("No usable client profile in clients.json (all need deciphering).".to_owned()));
     }
-    let mut last_error = String::new();
+    let mut failures: Vec<(String, InnerTubeError)> = Vec::new();
     for index in clients::rotation(usable.len()) {
         let client = usable[index];
         let body = request_body(client, video_id, visitor_data.as_deref());
@@ -122,10 +122,25 @@ pub fn resolve_with(video_id: &str, profiles: &[ClientProfile]) -> Result<Stream
                 clients::remember_success(index);
                 return Ok(Stream { url, user_agent: client.user_agent.clone(), mime_type, bitrate });
             }
-            Err(error) => last_error = format!("{} {}: {error}", client.name, client.client_version),
+            Err(error) => failures.push((format!("{} {}", client.name, client.client_version), error)),
         }
     }
-    Err(InnerTubeError::Api(format!("Could not get a stream from YouTube ({last_error}).")))
+    Err(summarize_failures(failures))
+}
+
+/// Explains why every client failed: a network problem if none of them got an answer,
+/// otherwise the last answer YouTube gave.
+pub fn summarize_failures(failures: Vec<(String, InnerTubeError)>) -> InnerTubeError {
+    if !failures.is_empty() && failures.iter().all(|(_, error)| matches!(error, InnerTubeError::Http(_))) {
+        return InnerTubeError::Unreachable;
+    }
+    let detail = failures
+        .iter()
+        .rev()
+        .find(|(_, error)| !matches!(error, InnerTubeError::Http(_)))
+        .map(|(label, error)| format!("{label}: {error}"))
+        .unwrap_or_else(|| "no client answered".to_owned());
+    InnerTubeError::Api(format!("Could not get a stream from YouTube ({detail})."))
 }
 
 #[cfg(test)]
@@ -167,6 +182,18 @@ mod tests {
         assert!(error.contains("LOGIN_REQUIRED") && error.contains("Sign in"));
         assert!(pick_audio_format(&response("OK", json!([]))).is_err());
         assert!(pick_audio_format(&json!({ "playabilityStatus": { "status": "OK" } })).is_err());
+    }
+
+    #[test]
+    fn summarizes_why_every_client_failed() {
+        let refused = |label: &str| (label.to_owned(), InnerTubeError::Refused("LOGIN_REQUIRED: Sign in".to_owned()));
+        let message = summarize_failures(vec![refused("A 1"), refused("B 2")]).to_string();
+        assert!(message.contains("B 2") && message.contains("LOGIN_REQUIRED"));
+        assert!(summarize_failures(vec![]).to_string().contains("no client answered"));
+        assert!(matches!(
+            summarize_failures(vec![("A 1".to_owned(), InnerTubeError::NoFormat)]),
+            InnerTubeError::Api(_)
+        ));
     }
 
     #[test]
