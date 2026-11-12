@@ -43,6 +43,8 @@ pub struct MpvPlayer {
     child: Child,
     socket_path: PathBuf,
     request_id: u64,
+    /// The user agent last given to mpv, so it is only set again when it changes.
+    user_agent: Option<String>,
 }
 
 impl MpvPlayer {
@@ -63,7 +65,7 @@ impl MpvPlayer {
             .stderr(Stdio::null())
             .spawn()
             .map_err(MpvError::NotInstalled)?;
-        let mut player = Self { child, socket_path, request_id: 0 };
+        let mut player = Self { child, socket_path, request_id: 0, user_agent: None };
         player.wait_for_socket()?;
         Ok(player)
     }
@@ -76,15 +78,46 @@ impl MpvPlayer {
         Ok(())
     }
 
-    /// Plays a stream resolved by [`twe_innertube::resolve`]. Only Google media hosts over
-    /// HTTPS are accepted, and MPV is told to use the same user agent the URL was issued to.
+    /// Plays a stream resolved by [`twe_innertube::resolve`], replacing whatever is playing (and
+    /// any track queued behind it). Only Google media hosts over HTTPS are accepted, and MPV is
+    /// told to use the same user agent the URL was issued to.
     pub fn load_stream(&mut self, stream: &twe_innertube::Stream) -> Result<(), MpvError> {
+        self.send_stream(stream, "replace")
+    }
+
+    /// Queues a stream to start the moment the current track ends, with no gap. mpv has one
+    /// user agent at a time, so a stream issued to a different client than the one playing
+    /// shares it for the last seconds of the current track; the clients in use rarely differ.
+    pub fn queue_stream(&mut self, stream: &twe_innertube::Stream) -> Result<(), MpvError> {
+        self.send_stream(stream, "append")
+    }
+
+    fn send_stream(&mut self, stream: &twe_innertube::Stream, mode: &str) -> Result<(), MpvError> {
         if !twe_innertube::is_allowed_stream_url(&stream.url) {
             return Err(MpvError::IpcUnavailable("refusing to load an unsupported URL".to_owned()));
         }
-        self.command(json!(["set_property", "user-agent", stream.user_agent]))?;
-        self.command(json!(["loadfile", stream.url, "replace"]))?;
+        if self.user_agent.as_deref() != Some(stream.user_agent.as_str()) {
+            self.command(json!(["set_property", "user-agent", stream.user_agent]))?;
+            self.user_agent = Some(stream.user_agent.clone());
+        }
+        self.command(json!(["loadfile", stream.url, mode]))?;
         Ok(())
+    }
+
+    /// Index of the playing entry in mpv's playlist. It becomes 1 when a queued stream has
+    /// taken over from the track before it.
+    pub fn playlist_pos(&mut self) -> Option<i64> {
+        self.get_property("playlist-pos").ok()?.as_i64()
+    }
+
+    /// Removes the finished first entry once a queued stream has taken over.
+    pub fn drop_finished_entry(&mut self) {
+        let _ = self.command(json!(["playlist-remove", 0]));
+    }
+
+    /// Drops everything queued behind the playing track.
+    pub fn clear_queued(&mut self) {
+        let _ = self.command(json!(["playlist-clear"]));
     }
 
     /// Reads an MPV property. An unavailable property (nothing loaded yet) is `Value::Null`.

@@ -6,6 +6,7 @@ pub mod m3;
 pub mod media;
 pub mod models;
 pub mod notifications;
+pub mod prefetch;
 pub mod settings;
 pub mod state;
 pub mod theme;
