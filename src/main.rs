@@ -1181,7 +1181,7 @@ impl TweMusicApp {
                 ui.add_space(4.0);
                 ui.label(theme::text(Role::BodyMedium, "Sign in through your browser: yt-dlp reads your signed-in YouTube session from the browser you pick and only the stream address comes back. TweMusic never stores your cookies. Needs yt-dlp (and deno or node) installed, and you signed in to YouTube in that browser.").color(c.on_surface_variant));
                 ui.add_space(12.0);
-                let labels = ["Off", "Firefox", "Chromium", "Chrome", "Brave", "Vivaldi"];
+                let labels = ["Off", "Firefox", "Chrome"];
                 let current = self
                     .settings
                     .ytdlp_browser
