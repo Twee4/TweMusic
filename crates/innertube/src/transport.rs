@@ -4,17 +4,12 @@ use std::time::Duration;
 
 use serde_json::Value;
 
-use crate::clients::ClientProfile;
+use crate::{clients::ClientProfile, InnerTubeError};
 
-pub const ORIGIN: &str = "https://music.youtube.com";
-pub const PLAYER_URL: &str = "https://music.youtube.com/youtubei/v1/player?prettyPrint=false";
 pub const VISITOR_DATA_URL: &str = "https://www.youtube.com/sw.js_data";
 
-pub fn http_client() -> Result<reqwest::blocking::Client, String> {
-    reqwest::blocking::Client::builder()
-        .timeout(Duration::from_secs(15))
-        .build()
-        .map_err(|error| format!("Could not start the network client: {error}"))
+pub fn http_client() -> Result<reqwest::blocking::Client, InnerTubeError> {
+    Ok(reqwest::blocking::Client::builder().timeout(Duration::from_secs(15)).build()?)
 }
 
 /// Fetches the raw page that contains the visitor ID. Failures just mean "no visitor ID".
@@ -28,23 +23,37 @@ pub fn post_player(
     client: &ClientProfile,
     body: &Value,
     visitor_data: Option<&str>,
-) -> Result<Value, String> {
+) -> Result<Value, InnerTubeError> {
+    post(http, client, "player", body, visitor_data)
+}
+
+/// Posts to an InnerTube endpoint (`player`, `search` or `browse`) as `client`.
+pub fn post(
+    http: &reqwest::blocking::Client,
+    client: &ClientProfile,
+    endpoint: &str,
+    body: &Value,
+    visitor_data: Option<&str>,
+) -> Result<Value, InnerTubeError> {
+    debug_assert!(["player", "search", "browse"].contains(&endpoint));
+    // The host was validated against YouTube's own hosts when the profile was loaded.
+    let origin = format!("https://{}", client.host);
     let mut request = http
-        .post(PLAYER_URL)
+        .post(format!("{origin}/youtubei/v1/{endpoint}?prettyPrint=false"))
         .header("User-Agent", client.user_agent.as_str())
         .header("X-Goog-Api-Format-Version", "1")
-        .header("X-YouTube-Client-Name", client.id.as_str())
-        .header("X-YouTube-Client-Version", client.version.as_str())
-        .header("Origin", ORIGIN)
-        .header("X-Origin", ORIGIN)
-        .header("Referer", format!("{ORIGIN}/"))
+        .header("X-YouTube-Client-Name", client.id())
+        .header("X-YouTube-Client-Version", client.client_version.as_str())
+        .header("Origin", origin.as_str())
+        .header("X-Origin", origin.as_str())
+        .header("Referer", format!("{origin}/"))
         .json(body);
     if let Some(visitor_data) = visitor_data {
         request = request.header("X-Goog-Visitor-Id", visitor_data);
     }
-    let response = request.send().map_err(|error| format!("network error: {error}"))?;
+    let response = request.send()?;
     if !response.status().is_success() {
-        return Err(format!("HTTP {}", response.status()));
+        return Err(InnerTubeError::Api(format!("HTTP {}", response.status())));
     }
-    response.json::<Value>().map_err(|error| format!("unreadable response: {error}"))
+    Ok(response.json::<Value>()?)
 }

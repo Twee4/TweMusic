@@ -24,6 +24,20 @@ pub struct Track {
     pub thumbnail_url: Option<String>,
 }
 
+impl From<twe_innertube::models::TrackInfo> for Track {
+    fn from(info: twe_innertube::models::TrackInfo) -> Self {
+        Self {
+            id: TrackId(twe_innertube::ids::stable_id(&info.video_id)),
+            title: info.title,
+            artist: info.artist,
+            album: info.album,
+            duration: Duration::from_secs(info.duration_secs),
+            video_id: Some(info.video_id),
+            thumbnail_url: info.thumbnail_url,
+        }
+    }
+}
+
 impl Track {
     pub fn new(id: u64, title: &str, artist: &str, album: Option<&str>, seconds: u64) -> Self {
         Self {

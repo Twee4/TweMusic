@@ -14,7 +14,8 @@ struct Player(Mutex<Option<MpvPlayer>>);
 async fn play_video(video_id: String, player: State<'_, Player>) -> Result<(), String> {
     let stream = tauri::async_runtime::spawn_blocking(move || twe_innertube::resolve(&video_id))
         .await
-        .map_err(|error| error.to_string())??;
+        .map_err(|error| error.to_string())?
+        .map_err(|error| error.to_string())?;
     let mut guard = player.0.lock().map_err(|_| "the player lock is poisoned".to_owned())?;
     if guard.is_none() {
         *guard = Some(MpvPlayer::start().map_err(|error| error.to_string())?);

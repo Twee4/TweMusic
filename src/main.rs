@@ -35,7 +35,7 @@ fn format_seconds(seconds: f64) -> String {
 /// Paints album art into `rect`, centre-cropped to fill it, once the image has loaded.
 /// While it loads (or if it fails, e.g. offline) nothing is drawn, so the placeholder
 /// underneath stays visible and egui's warning glyph never appears.
-fn paint_album_art(ui: &egui::Ui, url: &str, rect: Rect) {
+fn paint_album_art(ui: &egui::Ui, url: &str, rect: Rect, radius: f32) {
     let image = egui::Image::from_uri(url).show_loading_spinner(false);
     let Ok(egui::load::TexturePoll::Ready { texture }) = image.load_for_size(ui.ctx(), rect.size()) else {
         return;
@@ -50,7 +50,7 @@ fn paint_album_art(ui: &egui::Ui, url: &str, rect: Rect) {
     };
     image
         .uv(Rect::from_min_max(pos2(inset_x, inset_y), pos2(1.0 - inset_x, 1.0 - inset_y)))
-        .rounding(Rounding::same(shape::SMALL))
+        .rounding(Rounding::same(radius))
         .paint_at(ui, rect);
 }
 
@@ -340,7 +340,7 @@ impl TweMusicApp {
         let (tx, rx) = mpsc::channel();
         let wake = self.ctx.clone();
         thread::spawn(move || {
-            let _ = tx.send(stream::resolve(&video_id));
+            let _ = tx.send(stream::resolve(&video_id).map_err(|error| error.to_string()));
             wake.request_repaint();
         });
         // Replacing the receiver drops any older request; its result is simply ignored.
@@ -530,7 +530,7 @@ impl TweMusicApp {
     fn page_title(ui: &mut egui::Ui, title: &str, subtitle: &str) {
         let c = theme::colors(ui);
         ui.add_space(8.0);
-        ui.label(theme::text(Role::HeadlineMedium, title).color(c.on_surface));
+        ui.label(theme::text(Role::HeadlineLarge, title).color(c.on_surface));
         ui.label(theme::text(Role::BodyLarge, subtitle).color(c.on_surface_variant));
         ui.add_space(16.0);
     }
@@ -543,7 +543,7 @@ impl TweMusicApp {
 
     /// A Material 3 list item for a track: thumbnail, title and artist, duration, and
     /// play / like / more actions. Clicking the row plays the track.
-    fn track_row(&mut self, ui: &mut egui::Ui, track: &Track, index: usize) {
+    fn track_row(&mut self, ui: &mut egui::Ui, track: &Track, index: usize, count: usize) {
         let c = theme::colors(ui);
         let playable = track.video_id.is_some();
         let narrow = ui.available_width() < 480.0;
@@ -554,11 +554,10 @@ impl TweMusicApp {
         let mut action = RowAction::None;
 
         let (row, response) = ui.allocate_exact_size(vec2(ui.available_width(), 72.0), Sense::click());
-        let rounding = Rounding::same(shape::MEDIUM);
+        // Expressive grouped list: big outer corners on the first and last rows, small between.
+        let rounding = m3::grouped_rounding(index, count);
         let painter = ui.painter().clone();
-        if is_current {
-            painter.rect_filled(row, rounding, c.secondary_container);
-        }
+        painter.rect_filled(row, rounding, if is_current { c.secondary_container } else { c.surface_container_low });
         if response.hovered() {
             painter.rect_filled(row, rounding, theme::with_alpha(c.on_surface, theme::state::HOVER));
         }
@@ -573,11 +572,11 @@ impl TweMusicApp {
                 _ => (c.tertiary_container, c.on_tertiary_container),
             }
         };
-        let thumb = Rect::from_min_size(pos2(row.left() + 12.0, row.center().y - 24.0), vec2(48.0, 48.0));
-        painter.rect_filled(thumb, Rounding::same(shape::SMALL), thumb_bg);
+        let thumb = Rect::from_min_size(pos2(row.left() + 8.0, row.center().y - 28.0), vec2(56.0, 56.0));
+        painter.rect_filled(thumb, Rounding::same(shape::LARGE), thumb_bg);
         Icon::Note.paint(&painter, thumb.center(), 24.0, thumb_fg, false);
         if let Some(url) = track.thumbnail_url.as_deref() {
-            paint_album_art(ui, url, thumb);
+            paint_album_art(ui, url, thumb, shape::LARGE);
         }
 
         // Layout: [thumb] [title / artist ...] [duration] [play] [like] [more]
@@ -694,7 +693,7 @@ impl TweMusicApp {
         let tracks = self.state.tracks.clone();
         ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| {
             for (index, track) in tracks.iter().enumerate() {
-                self.track_row(ui, track, index);
+                self.track_row(ui, track, index, tracks.len());
             }
         });
     }
@@ -718,7 +717,7 @@ impl TweMusicApp {
         }
         ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| {
             for (index, track) in results.iter().enumerate() {
-                self.track_row(ui, track, index);
+                self.track_row(ui, track, index, results.len());
             }
         });
     }
@@ -802,7 +801,7 @@ impl TweMusicApp {
         }
         ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| {
             for (index, track) in tracks.iter().enumerate() {
-                self.track_row(ui, track, index);
+                self.track_row(ui, track, index, tracks.len());
             }
         });
     }
@@ -905,18 +904,12 @@ impl TweMusicApp {
                 ui.add_space(4.0);
                 ui.label(theme::text(Role::BodyMedium, "Search returns public metadata. Play asks YouTube for the audio stream only and plays it through MPV, so no video or ads load.").color(c.on_surface_variant));
                 ui.add_space(4.0);
-                ui.label(theme::text(Role::BodyMedium, "Requires mpv (yt-dlp is only used to import playlists). This may go against YouTube's terms of service, and YouTube can change how streams work at any time.").color(c.on_surface_variant));
+                ui.label(theme::text(Role::BodyMedium, "Requires mpv. This may go against YouTube's terms of service, and YouTube can change how streams work at any time.").color(c.on_surface_variant));
             });
         });
     }
 
     fn render_top_bar(&mut self, ctx: &Context, c: &ColorScheme, margin: f32) {
-        let title = match self.state.screen {
-            Screen::Home => "Home",
-            Screen::Search => "Search",
-            Screen::Library => "Library",
-            Screen::Settings => "Settings",
-        };
         TopBottomPanel::top("top-app-bar")
             .exact_height(64.0)
             .show_separator_line(false)
@@ -927,7 +920,7 @@ impl TweMusicApp {
                     ui.painter().circle_filled(rect.center(), 16.0, c.primary_container);
                     Icon::Note.paint(ui.painter(), rect.center(), 18.0, c.on_primary_container, false);
                     ui.add_space(8.0);
-                    ui.label(theme::text(Role::TitleLarge, title).color(c.on_surface));
+                    ui.label(theme::text(Role::HeadlineSmall, "TweMusic").color(c.on_surface));
                     ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                         if m3::icon_button(ui, IconButtonKind::Standard, Icon::Power, false, "Quit TweMusic").clicked() {
                             self.quit(ctx);
@@ -1011,6 +1004,7 @@ impl TweMusicApp {
             .current_track()
             .filter(|_| self.mpv.is_some())
             .and_then(|track| track.thumbnail_url.clone());
+        let loading = self.stream_rx.is_some() || self.loading_since.is_some();
         let mut seek_event = SeekEvent::Idle;
 
         TopBottomPanel::bottom("player-panel")
@@ -1019,34 +1013,40 @@ impl TweMusicApp {
             .show(ctx, |ui| {
                 Frame::none()
                     .fill(c.surface_container_high)
-                    .rounding(Rounding::same(shape::LARGE))
-                    .inner_margin(Margin::same(12.0))
+                    .rounding(Rounding::same(shape::EXTRA_LARGE_INCREASED))
+                    .inner_margin(Margin::same(16.0))
                     .show(ui, |ui| {
                         ui.set_width(ui.available_width());
                         ui.horizontal(|ui| {
-                            let (thumb, _) = ui.allocate_exact_size(vec2(48.0, 48.0), Sense::hover());
-                            ui.painter().rect_filled(thumb, Rounding::same(shape::SMALL), c.primary_container);
-                            Icon::Note.paint(ui.painter(), thumb.center(), 24.0, c.on_primary_container, false);
+                            let (thumb, _) = ui.allocate_exact_size(vec2(64.0, 64.0), Sense::hover());
+                            ui.painter().rect_filled(thumb, Rounding::same(shape::LARGE_INCREASED), c.primary_container);
+                            Icon::Note.paint(ui.painter(), thumb.center(), 28.0, c.on_primary_container, false);
                             if let Some(url) = &art {
-                                paint_album_art(ui, url, thumb);
+                                paint_album_art(ui, url, thumb, shape::LARGE_INCREASED);
                             }
 
-                            let text_width = (ui.available_width() - 12.0 - 40.0 - 48.0 - 40.0 - 24.0).max(60.0);
-                            ui.allocate_ui_with_layout(vec2(text_width, 48.0), Layout::top_down(Align::Min), |ui| {
+                            // Room for previous (48) + play (64) + next (48) and their gaps.
+                            let text_width = (ui.available_width() - 12.0 - 48.0 - 64.0 - 48.0 - 32.0).max(60.0);
+                            ui.allocate_ui_with_layout(vec2(text_width, 64.0), Layout::top_down(Align::Min), |ui| {
                                 ui.spacing_mut().item_spacing.y = 0.0;
                                 ui.add(egui::Label::new(theme::text(Role::TitleMedium, &title).color(c.on_surface)).truncate().selectable(false));
                                 ui.add(egui::Label::new(theme::text(Role::BodyMedium, &status).color(c.on_surface_variant)).truncate().selectable(false));
                             });
 
                             ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                                if m3::icon_button_ex(ui, IconButtonKind::Standard, Icon::Next, false, can_next, 40.0, "Next").clicked() {
+                                ui.spacing_mut().item_spacing.x = 8.0;
+                                if m3::icon_button_ex(ui, IconButtonKind::Tonal, Icon::Next, false, can_next, 48.0, "Next").clicked() {
                                     self.skip(true);
                                 }
-                                let (icon, tooltip) = if playing { (Icon::Pause, "Pause") } else { (Icon::Play, "Play") };
-                                if m3::icon_button_ex(ui, IconButtonKind::Filled, icon, false, true, 48.0, tooltip).clicked() {
+                                if loading {
+                                    // Same footprint as the play button, so nothing shifts.
+                                    ui.allocate_ui(vec2(64.0, 64.0), |ui| {
+                                        ui.centered_and_justified(|ui| m3::loading_indicator(ui, 56.0));
+                                    });
+                                } else if m3::play_button(ui, playing, if playing { "Pause" } else { "Play" }).clicked() {
                                     self.toggle_local_playback();
                                 }
-                                if m3::icon_button_ex(ui, IconButtonKind::Standard, Icon::Previous, false, can_prev, 40.0, "Previous").clicked() {
+                                if m3::icon_button_ex(ui, IconButtonKind::Tonal, Icon::Previous, false, can_prev, 48.0, "Previous").clicked() {
                                     self.skip(false);
                                 }
                             });
@@ -1060,7 +1060,7 @@ impl TweMusicApp {
                                 egui::Label::new(theme::text(Role::LabelMedium, format_seconds(shown)).color(c.on_surface_variant)).selectable(false),
                             );
                             let bar_width = (ui.available_width() - 44.0 - ui.spacing().item_spacing.x).max(60.0);
-                            seek_event = m3::seek_bar(ui, shown, duration, bar_width, progress.is_some());
+                            seek_event = m3::wavy_seek_bar(ui, shown, duration, bar_width, progress.is_some(), playing);
                             ui.add_sized(
                                 [44.0, 32.0],
                                 egui::Label::new(theme::text(Role::LabelMedium, format_seconds(duration)).color(c.on_surface_variant)).selectable(false),
