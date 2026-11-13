@@ -1179,17 +1179,22 @@ impl TweMusicApp {
                 ui.add_space(16.0);
                 ui.label(theme::text(Role::TitleSmall, "If YouTube blocks this connection").color(c.on_surface));
                 ui.add_space(4.0);
-                ui.label(theme::text(Role::BodyMedium, "Sign in through your browser: yt-dlp reads your signed-in YouTube session from the browser you pick and only the stream address comes back. TweMusic never stores your cookies. Needs yt-dlp (and deno or node) installed, and you signed in to YouTube in that browser.").color(c.on_surface_variant));
+                ui.label(theme::text(Role::BodyMedium, "Needs yt-dlp (and deno or node) installed. \"No sign-in\" asks yt-dlp for the stream without any account. If YouTube still refuses, pick a browser you are signed in to YouTube with: yt-dlp reads that session itself and only the stream address comes back. TweMusic never stores your cookies.").color(c.on_surface_variant));
                 ui.add_space(12.0);
-                let labels = ["Off", "Firefox", "Chrome"];
-                let current = self
-                    .settings
-                    .ytdlp_browser
-                    .as_deref()
-                    .and_then(|name| ytdlp::BROWSERS.iter().position(|known| *known == name))
-                    .map_or(0, |index| index + 1);
+                // Each label is paired with the value it stores, so they cannot drift apart.
+                const CHOICES: [(&str, Option<&str>); 4] = [
+                    ("Off", None),
+                    ("No sign-in", Some(ytdlp::NO_SIGN_IN)),
+                    ("Firefox", Some("firefox")),
+                    ("Chrome", Some("chrome")),
+                ];
+                let labels = CHOICES.map(|(label, _)| label);
+                let current = CHOICES
+                    .iter()
+                    .position(|(_, value)| *value == self.settings.ytdlp_browser.as_deref())
+                    .unwrap_or(0);
                 if let Some(choice) = m3::segmented(ui, &labels, current) {
-                    self.settings.ytdlp_browser = choice.checked_sub(1).and_then(|index| ytdlp::BROWSERS.get(index)).map(|name| (*name).to_owned());
+                    self.settings.ytdlp_browser = CHOICES.get(choice).and_then(|(_, value)| *value).map(str::to_owned);
                     self.save_settings();
                 }
             });
