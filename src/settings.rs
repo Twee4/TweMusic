@@ -13,9 +13,9 @@ pub struct Settings {
     pub tray: bool,
     /// Tint the app with colours taken from the album art of the current song.
     pub dynamic_color: bool,
-    /// When YouTube's bot check blocks the direct lookup: the browser whose signed-in cookies
-    /// yt-dlp should use instead, or `ytdlp::NO_SIGN_IN` for yt-dlp without cookies (None = never
-    /// use yt-dlp). See `ytdlp::BROWSERS`.
+    /// Advanced, hand-edited only: when YouTube's bot check blocks the direct lookup, yt-dlp is
+    /// used with no sign-in. Set this to a browser name from `ytdlp::BROWSERS` to have yt-dlp read
+    /// that browser's signed-in session instead. Unset (or unknown) means no sign-in.
     pub ytdlp_browser: Option<String>,
 }
 
