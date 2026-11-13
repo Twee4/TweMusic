@@ -1,7 +1,8 @@
 //! Optional fallback for when YouTube's bot check blocks TweMusic's own stream lookup.
 //!
-//! If the user picks a browser in Settings, `yt-dlp` is run with `--cookies-from-browser`, so
-//! the lookup happens as the user's signed-in session. TweMusic never reads, stores or sends
+//! If the user turns this on in Settings, `yt-dlp` is run instead: either with no sign-in at all
+//! (`NO_SIGN_IN`), or with `--cookies-from-browser`, so the lookup happens as the user's signed-in
+//! session. TweMusic never reads, stores or sends
 //! the cookies itself: yt-dlp reads them from the browser each time, and only the resulting
 //! stream address comes back. Nothing here runs unless the user turned it on and the direct
 //! lookup was refused by the bot check.
@@ -30,8 +31,12 @@ const FALLBACK_USER_AGENT: &str =
 
 static BLOCKED_UNTIL: Mutex<Option<Instant>> = Mutex::new(None);
 
+/// The setting value for "use yt-dlp, but read no cookies".
+pub const NO_SIGN_IN: &str = "none";
+
+/// True for the values the setting may hold: a known browser, or `NO_SIGN_IN`.
 pub fn is_supported_browser(name: &str) -> bool {
-    BROWSERS.contains(&name)
+    name == NO_SIGN_IN || BROWSERS.contains(&name)
 }
 
 /// Looks the track up directly; if YouTube's bot check refuses and `browser` is set, asks
@@ -61,7 +66,8 @@ fn via_ytdlp(video_id: &str, browser: &str) -> Result<Stream, String> {
     let mut child = Command::new("yt-dlp")
         // A user config could add options such as --exec; ignore it.
         .args(["--ignore-config", "--no-playlist", "--no-warnings", "-j", "-f", "bestaudio/best"])
-        .args(["--cookies-from-browser", browser, "--"])
+        .args(cookie_args(browser))
+        .arg("--")
         .arg(&url)
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
@@ -107,12 +113,19 @@ fn via_ytdlp(video_id: &str, browser: &str) -> Result<Stream, String> {
     parse_output(&output)
 }
 
+/// The yt-dlp options that choose where cookies come from: none for `NO_SIGN_IN`.
+fn cookie_args(browser: &str) -> Vec<&str> {
+    if browser == NO_SIGN_IN { Vec::new() } else { vec!["--cookies-from-browser", browser] }
+}
+
 /// A short, readable reason from yt-dlp's last error line.
 fn describe_failure(stderr: &str, browser: &str) -> String {
     let last = stderr.lines().rev().find(|line| line.contains("ERROR")).unwrap_or("").trim();
     let lower = last.to_ascii_lowercase();
     if lower.contains("cookie") || lower.contains("keyring") || lower.contains("database") {
         format!("yt-dlp could not read {browser}'s cookies. Close {browser} and check you are signed in to YouTube there.")
+    } else if (lower.contains("not a bot") || lower.contains("sign in")) && browser == NO_SIGN_IN {
+        "YouTube still asked for sign-in. In Settings, pick a browser you are signed in to YouTube with.".to_owned()
     } else if lower.contains("not a bot") || lower.contains("sign in") {
         format!("YouTube still asked for sign-in. Open music.youtube.com in {browser}, sign in, then try again.")
     } else if last.is_empty() {
@@ -149,6 +162,7 @@ mod tests {
     #[test]
     fn only_known_browsers_are_accepted() {
         assert!(is_supported_browser("firefox"));
+        assert!(is_supported_browser(NO_SIGN_IN));
         assert!(!is_supported_browser("firefox:default; rm"));
         assert!(!is_supported_browser("--exec"));
         assert!(!is_supported_browser(""));
@@ -176,7 +190,14 @@ mod tests {
     }
 
     #[test]
+    fn no_sign_in_passes_no_cookie_options() {
+        assert!(cookie_args(NO_SIGN_IN).is_empty());
+        assert_eq!(cookie_args("firefox"), ["--cookies-from-browser", "firefox"]);
+    }
+
+    #[test]
     fn failure_text_is_readable() {
+        assert!(describe_failure("ERROR: Sign in to confirm you're not a bot", NO_SIGN_IN).contains("pick a browser"));
         assert!(describe_failure("ERROR: could not find firefox cookies database", "firefox").contains("Close firefox"));
         assert!(describe_failure("ERROR: Sign in to confirm you're not a bot", "brave").contains("music.youtube.com"));
         assert!(describe_failure("", "firefox").contains("without an error message"));
