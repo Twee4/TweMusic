@@ -500,9 +500,14 @@ impl TweMusicApp {
         }
     }
 
-    /// The browser to sign in through when YouTube's bot check blocks the direct lookup.
+    /// What yt-dlp should use when YouTube's bot check blocks the direct lookup.
     fn ytdlp_browser(&self) -> Option<String> {
-        self.settings.ytdlp_browser.clone().filter(|name| ytdlp::is_supported_browser(name))
+        // yt-dlp without sign-in is the default; a browser can still be set by hand in settings.json.
+        self.settings
+            .ytdlp_browser
+            .clone()
+            .filter(|name| ytdlp::is_supported_browser(name))
+            .or_else(|| Some(ytdlp::NO_SIGN_IN.to_owned()))
     }
 
     /// Resolves `track`'s stream on a worker thread, for prefetching or refreshing.
@@ -1176,27 +1181,6 @@ impl TweMusicApp {
                 ui.label(theme::text(Role::BodyMedium, "Search returns public metadata. Play asks YouTube for the audio stream only and plays it through MPV, so no video or ads load.").color(c.on_surface_variant));
                 ui.add_space(4.0);
                 ui.label(theme::text(Role::BodyMedium, "Requires mpv. This may go against YouTube's terms of service, and YouTube can change how streams work at any time.").color(c.on_surface_variant));
-                ui.add_space(16.0);
-                ui.label(theme::text(Role::TitleSmall, "If YouTube blocks this connection").color(c.on_surface));
-                ui.add_space(4.0);
-                ui.label(theme::text(Role::BodyMedium, "Needs yt-dlp (and deno or node) installed. \"No sign-in\" asks yt-dlp for the stream without any account. If YouTube still refuses, pick a browser you are signed in to YouTube with: yt-dlp reads that session itself and only the stream address comes back. TweMusic never stores your cookies.").color(c.on_surface_variant));
-                ui.add_space(12.0);
-                // Each label is paired with the value it stores, so they cannot drift apart.
-                const CHOICES: [(&str, Option<&str>); 4] = [
-                    ("Off", None),
-                    ("No sign-in", Some(ytdlp::NO_SIGN_IN)),
-                    ("Firefox", Some("firefox")),
-                    ("Chrome", Some("chrome")),
-                ];
-                let labels = CHOICES.map(|(label, _)| label);
-                let current = CHOICES
-                    .iter()
-                    .position(|(_, value)| *value == self.settings.ytdlp_browser.as_deref())
-                    .unwrap_or(0);
-                if let Some(choice) = m3::segmented(ui, &labels, current) {
-                    self.settings.ytdlp_browser = CHOICES.get(choice).and_then(|(_, value)| *value).map(str::to_owned);
-                    self.save_settings();
-                }
             });
         });
     }
