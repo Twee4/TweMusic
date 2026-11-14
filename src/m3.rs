@@ -31,13 +31,13 @@ pub fn spring(ui: &Ui, id: egui::Id, target: f32, spring: motion::Spring) -> f32
     next
 }
 
-fn lerp(from: f32, to: f32, t: f32) -> f32 {
+pub(crate) fn lerp(from: f32, to: f32, t: f32) -> f32 {
     from + (to - from) * t
 }
 
 /// Paints the hover / focus / pressed overlay for a component. `content` is the colour the
 /// component draws its label or icon in, which is also the state layer colour.
-fn state_layer(ui: &Ui, rect: Rect, rounding: Rounding, response: &Response, content: Color32, enabled: bool) {
+pub(crate) fn state_layer(ui: &Ui, rect: Rect, rounding: Rounding, response: &Response, content: Color32, enabled: bool) {
     if !enabled {
         return;
     }
@@ -53,7 +53,7 @@ fn state_layer(ui: &Ui, rect: Rect, rounding: Rounding, response: &Response, con
     ui.painter().rect_filled(rect, rounding, with_alpha(content, alpha));
 }
 
-fn pointer_cursor(response: Response, enabled: bool) -> Response {
+pub fn pointer_cursor(response: Response, enabled: bool) -> Response {
     if enabled { response.on_hover_cursor(CursorIcon::PointingHand) } else { response }
 }
 

@@ -22,6 +22,14 @@ pub enum Icon {
     Contrast,
     Note,
     Power,
+    History,
+    Activity,
+    User,
+    Shuffle,
+    Bolt,
+    Moon,
+    Smile,
+    Dumbbell,
 }
 
 impl Icon {
@@ -123,6 +131,96 @@ impl Icon {
                     .collect();
                 painter.add(Shape::line(arc, stroke));
                 painter.line_segment([at(12.0, 3.0), at(12.0, 11.5)], stroke);
+            }
+            Self::History => {
+                // A clock face with a gap at the upper left, and hands.
+                let arc: Vec<Pos2> = (0..=26)
+                    .map(|step| {
+                        let angle = -PI * 0.5 + 0.55 + step as f32 / 26.0 * (2.0 * PI - 1.1);
+                        at(12.0 + 8.5 * angle.cos(), 12.0 + 8.5 * angle.sin())
+                    })
+                    .collect();
+                painter.add(Shape::line(arc, stroke));
+                painter.add(Shape::line(vec![at(12.0, 7.0), at(12.0, 12.0), at(15.5, 14.0)], stroke));
+            }
+            Self::Activity => {
+                painter.add(Shape::line(
+                    vec![at(3.0, 12.0), at(7.0, 12.0), at(10.0, 4.5), at(14.0, 19.5), at(17.0, 12.0), at(21.0, 12.0)],
+                    stroke,
+                ));
+            }
+            Self::User => {
+                painter.circle_stroke(at(12.0, 8.0), 4.0 * unit, stroke);
+                let shoulders: Vec<Pos2> = (0..=20)
+                    .map(|step| {
+                        let angle = PI + step as f32 / 20.0 * PI;
+                        at(12.0 + 8.0 * angle.cos(), 21.0 + 8.0 * angle.sin())
+                    })
+                    .collect();
+                painter.add(Shape::line(shoulders, stroke));
+            }
+            Self::Shuffle => {
+                painter.add(Shape::line(vec![at(3.0, 7.0), at(7.0, 7.0), at(16.0, 17.0), at(20.5, 17.0)], stroke));
+                painter.add(Shape::line(vec![at(3.0, 17.0), at(7.0, 17.0), at(10.0, 13.6)], stroke));
+                painter.add(Shape::line(vec![at(14.0, 9.4), at(16.0, 7.0), at(20.5, 7.0)], stroke));
+                painter.add(Shape::line(vec![at(18.0, 4.5), at(20.5, 7.0), at(18.0, 9.5)], stroke));
+                painter.add(Shape::line(vec![at(18.0, 14.5), at(20.5, 17.0), at(18.0, 19.5)], stroke));
+            }
+            Self::Bolt => {
+                painter.add(Shape::closed_line(
+                    vec![at(13.0, 2.5), at(4.5, 14.0), at(11.0, 14.0), at(10.0, 21.5), at(19.5, 10.0), at(13.0, 10.0)],
+                    stroke,
+                ));
+            }
+            Self::Moon => {
+                // A crescent: the part of a circle that lies outside a second, offset circle.
+                let (a_center, a_radius) = ((12.0_f32, 12.0_f32), 8.5_f32);
+                let (b_center, b_radius) = ((17.0_f32, 8.0_f32), 7.0_f32);
+                let start = (b_center.1 - a_center.1).atan2(b_center.0 - a_center.0);
+                let outer: Vec<(f32, f32)> = (0..=60)
+                    .map(|step| start + step as f32 / 60.0 * 2.0 * PI)
+                    .map(|angle| (a_center.0 + a_radius * angle.cos(), a_center.1 + a_radius * angle.sin()))
+                    .filter(|(x, y)| (x - b_center.0).hypot(y - b_center.1) > b_radius)
+                    .collect();
+                let back = (a_center.1 - b_center.1).atan2(a_center.0 - b_center.0);
+                let mut inner: Vec<(f32, f32)> = (0..=60)
+                    .map(|step| back - PI + step as f32 / 60.0 * 2.0 * PI)
+                    .map(|angle| (b_center.0 + b_radius * angle.cos(), b_center.1 + b_radius * angle.sin()))
+                    .filter(|(x, y)| (x - a_center.0).hypot(y - a_center.1) < a_radius)
+                    .collect();
+                if let (Some(last), Some(first), Some(end)) = (outer.last(), inner.first(), inner.last()) {
+                    let gap = |p: &(f32, f32), q: &(f32, f32)| (p.0 - q.0).hypot(p.1 - q.1);
+                    if gap(last, end) < gap(last, first) {
+                        inner.reverse();
+                    }
+                }
+                let outline: Vec<Pos2> = outer.iter().chain(inner.iter()).map(|(x, y)| at(*x, *y)).collect();
+                if outline.len() > 2 {
+                    painter.add(Shape::closed_line(outline, stroke));
+                }
+            }
+            Self::Smile => {
+                painter.circle_stroke(at(12.0, 12.0), 9.0 * unit, stroke);
+                painter.circle_filled(at(9.0, 9.6), 1.3 * unit, color);
+                painter.circle_filled(at(15.0, 9.6), 1.3 * unit, color);
+                let mouth: Vec<Pos2> = (0..=14)
+                    .map(|step| {
+                        let angle = 0.16 * PI + step as f32 / 14.0 * 0.68 * PI;
+                        at(12.0 + 5.6 * angle.cos(), 11.5 + 5.6 * angle.sin())
+                    })
+                    .collect();
+                painter.add(Shape::line(mouth, stroke));
+            }
+            Self::Dumbbell => {
+                for (from, to) in [
+                    ((6.5, 6.5), (6.5, 17.5)),
+                    ((17.5, 6.5), (17.5, 17.5)),
+                    ((3.5, 9.0), (3.5, 15.0)),
+                    ((20.5, 9.0), (20.5, 15.0)),
+                    ((6.5, 12.0), (17.5, 12.0)),
+                ] {
+                    painter.line_segment([at(from.0, from.1), at(to.0, to.1)], stroke);
+                }
             }
             Self::Contrast => {
                 painter.circle_stroke(at(12.0, 12.0), 8.0 * unit, stroke);
