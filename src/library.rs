@@ -1,6 +1,7 @@
 //! The user's local library: Liked songs and playlists, saved as JSON on this computer.
 
 use std::{
+    collections::BTreeMap,
     fs, io,
     path::{Path, PathBuf},
     time::Duration,
@@ -67,7 +68,18 @@ pub struct Playlist {
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct Library {
     pub playlists: Vec<Playlist>,
+    /// Recently played tracks, newest first. Added later; older files don't have it.
+    #[serde(default)]
+    pub history: Vec<SavedTrack>,
+    /// Seconds listened per day (days since 1970-01-01). Added later, like `history`.
+    #[serde(default)]
+    pub listening: BTreeMap<u32, u32>,
 }
+
+/// How many recently played tracks are kept.
+pub const HISTORY_LIMIT: usize = 40;
+/// How many days of listening time are kept.
+const LISTENING_DAYS: u32 = 60;
 
 /// `$XDG_DATA_HOME/twe_music/library.json`, falling back to `~/.local/share`.
 pub fn default_path() -> Option<PathBuf> {
@@ -76,6 +88,18 @@ pub fn default_path() -> Option<PathBuf> {
         .filter(|path| path.is_absolute())
         .or_else(|| std::env::var_os("HOME").map(|home| PathBuf::from(home).join(".local/share")))?;
     Some(base.join("twe_music").join("library.json"))
+}
+
+/// Returns `items` in a random order (xorshift Fisher-Yates; `seed` picks the order).
+pub fn shuffled<T>(mut items: Vec<T>, seed: u64) -> Vec<T> {
+    let mut state = seed | 1;
+    for end in (1..items.len()).rev() {
+        state ^= state << 13;
+        state ^= state >> 7;
+        state ^= state << 17;
+        items.swap(end, (state % (end as u64 + 1)) as usize);
+    }
+    items
 }
 
 impl Library {
@@ -114,6 +138,31 @@ impl Library {
         let temp = path.with_extension("json.tmp");
         fs::write(&temp, json)?;
         fs::rename(&temp, path)
+    }
+
+    /// Notes that a track started playing: it moves to the front of the history.
+    pub fn record_play(&mut self, track: &Track) {
+        let Some(saved) = SavedTrack::from_track(track) else { return; };
+        self.history.retain(|existing| existing.video_id != saved.video_id);
+        self.history.insert(0, saved);
+        self.history.truncate(HISTORY_LIMIT);
+    }
+
+    /// Adds listening time to `day` and forgets days older than the retention window.
+    pub fn add_listening(&mut self, day: u32, seconds: u32) {
+        *self.listening.entry(day).or_insert(0) += seconds;
+        let oldest = day.saturating_sub(LISTENING_DAYS);
+        self.listening.retain(|kept, _| *kept >= oldest);
+    }
+
+    /// Seconds listened on each of the last `days` days ending at `today`, oldest first.
+    pub fn listening_week(&self, today: u32, days: u32) -> Vec<u32> {
+        (0..days)
+            .map(|back| {
+                let day = today.saturating_sub(days - 1 - back);
+                self.listening.get(&day).copied().unwrap_or(0)
+            })
+            .collect()
     }
 
     pub fn is_liked(&self, track: &Track) -> bool {
@@ -220,6 +269,47 @@ mod tests {
         let old = r#"{ "video_id": "aaaaaaaaaaa", "title": "T", "artist": "A", "album": null, "duration_secs": 5 }"#;
         let loaded: SavedTrack = serde_json::from_str(old).unwrap();
         assert_eq!(loaded.thumbnail_url, None);
+    }
+
+    #[test]
+    fn history_is_deduplicated_newest_first_and_capped() {
+        let mut library = Library::new();
+        library.record_play(&sample("aaaaaaaaaaa"));
+        library.record_play(&sample("bbbbbbbbbbb"));
+        library.record_play(&sample("aaaaaaaaaaa"));
+        let ids: Vec<&str> = library.history.iter().map(|saved| saved.video_id.as_str()).collect();
+        assert_eq!(ids, ["aaaaaaaaaaa", "bbbbbbbbbbb"]);
+        library.record_play(&Track::new(1, "Demo", "Nobody", None, 10));
+        assert_eq!(library.history.len(), 2);
+        for index in 0..60 {
+            library.record_play(&sample(&format!("{index:011}")));
+        }
+        assert_eq!(library.history.len(), HISTORY_LIMIT);
+    }
+
+    #[test]
+    fn listening_adds_up_per_day_and_old_files_still_load() {
+        let mut library = Library::new();
+        library.add_listening(100, 30);
+        library.add_listening(100, 20);
+        library.add_listening(98, 7);
+        assert_eq!(library.listening_week(100, 4), vec![0, 7, 0, 50]);
+        library.add_listening(300, 1);
+        assert!(!library.listening.contains_key(&100));
+        let old = r#"{ "playlists": [] }"#;
+        let loaded: Library = serde_json::from_str(old).unwrap();
+        assert!(loaded.history.is_empty() && loaded.listening.is_empty());
+    }
+
+    #[test]
+    fn shuffled_keeps_every_item() {
+        let items: Vec<u32> = (0..50).collect();
+        let mixed = shuffled(items.clone(), 12345);
+        assert_ne!(mixed, items);
+        let mut sorted = mixed;
+        sorted.sort_unstable();
+        assert_eq!(sorted, items);
+        assert!(shuffled(Vec::<u32>::new(), 1).is_empty());
     }
 
     #[test]

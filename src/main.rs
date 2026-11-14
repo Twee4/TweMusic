@@ -5,7 +5,10 @@ use eframe::egui::{
     Sense, SidePanel, ThemePreference, TopBottomPanel, UiBuilder,
 };
 use souvlaki::{MediaControlEvent, MediaPosition};
+mod home;
+
 use twe_music::{
+    glass::{self, paint_album_art},
     dynamic_color::{self, Transition},
     prefetch,
     ytdlp,
@@ -33,28 +36,6 @@ const SNACKBAR_TIME: Duration = Duration::from_secs(4);
 fn format_seconds(seconds: f64) -> String {
     let total = seconds.max(0.0) as u64;
     format!("{}:{:02}", total / 60, total % 60)
-}
-
-/// Paints album art into `rect`, centre-cropped to fill it, once the image has loaded.
-/// While it loads (or if it fails, e.g. offline) nothing is drawn, so the placeholder
-/// underneath stays visible and egui's warning glyph never appears.
-fn paint_album_art(ui: &egui::Ui, url: &str, rect: Rect, radius: f32) {
-    let image = egui::Image::from_uri(url).show_loading_spinner(false);
-    let Ok(egui::load::TexturePoll::Ready { texture }) = image.load_for_size(ui.ctx(), rect.size()) else {
-        return;
-    };
-    let aspect = if texture.size.y > 0.0 { texture.size.x / texture.size.y } else { 1.0 };
-    let (inset_x, inset_y) = if aspect > 1.0 {
-        ((1.0 - 1.0 / aspect) / 2.0, 0.0)
-    } else if aspect > 0.0 {
-        (0.0, (1.0 - aspect) / 2.0)
-    } else {
-        (0.0, 0.0)
-    };
-    image
-        .uv(Rect::from_min_max(pos2(inset_x, inset_y), pos2(1.0 - inset_x, 1.0 - inset_y)))
-        .rounding(Rounding::same(radius))
-        .paint_at(ui, rect);
 }
 
 /// What the user asked for in a track row; applied after the row is drawn.
@@ -128,6 +109,9 @@ struct TweMusicApp {
     scheme: Transition,
     art_url: Option<String>,
     art_rx: Option<Receiver<(String, Option<f32>)>>,
+    home: home::HomeState,
+    /// Listening seconds not yet added to the library's activity log.
+    listen_carry: f32,
 }
 
 impl TweMusicApp {
@@ -159,6 +143,7 @@ impl TweMusicApp {
             notice_tx, notice_rx, scheme: Transition::new(), art_url: None, art_rx: None,
             stream_issued: None, refresh_rx: None, refresh_backoff: None, resume_at: None,
             prefetch_rx: None, prefetch_tried: None, queued_next: None, announced: None,
+            home: home::HomeState::default(), listen_carry: 0.0,
         };
         if app.settings.tray {
             app.start_tray(&ctx);
@@ -471,6 +456,8 @@ impl TweMusicApp {
                     self.state.tracks.push(track.clone());
                 }
                 self.state.play_track(track.id);
+                self.library.record_play(track);
+                self.save_library();
                 self.stream_issued = Some(Instant::now());
                 self.queued_next = None;
                 self.prefetch_rx = None;
@@ -584,6 +571,8 @@ impl TweMusicApp {
         }
         let Some(track) = self.state.tracks.iter().find(|track| track.id == id).cloned() else { return };
         self.state.play_track(id);
+        self.library.record_play(&track);
+        self.save_library();
         self.stream_issued = issued.or(Some(Instant::now()));
         self.prefetch_tried = None;
         self.position = None;
@@ -642,6 +631,7 @@ impl TweMusicApp {
         let interval = Duration::from_millis(500);
         ctx.request_repaint_after(interval);
         if self.last_poll.elapsed() < interval { return; }
+        let elapsed = self.last_poll.elapsed();
         let Some(player) = self.mpv.as_mut() else { return; };
         self.last_poll = Instant::now();
         let position = player.position();
@@ -651,6 +641,7 @@ impl TweMusicApp {
         self.position = position;
         self.duration = duration;
         if position.is_some_and(|value| value > 0.0) {
+            self.record_listening(elapsed);
             if !self.played_something {
                 self.player_message = None;
             }
@@ -947,23 +938,6 @@ impl TweMusicApp {
         ui.add_space(2.0);
     }
 
-    fn render_home(&mut self, ui: &mut egui::Ui) {
-        Self::page_title(ui, "Welcome back", "Find something lovely to listen to.");
-        // Once something is playing, Home shows what comes next; until then, the quick picks.
-        let up_next = self.state.up_next(25);
-        let (heading, tracks) = if up_next.is_empty() {
-            ("Quick picks", self.state.tracks.clone())
-        } else {
-            ("Up next", up_next)
-        };
-        Self::section_title(ui, heading);
-        ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| {
-            for (index, track) in tracks.iter().enumerate() {
-                self.track_row(ui, track, index, tracks.len());
-            }
-        });
-    }
-
     fn render_search(&mut self, ui: &mut egui::Ui, ctx: &Context) {
         let c = theme::colors(ui);
         Self::page_title(ui, "Search", "Discover songs and artists on YouTube Music.");
@@ -1189,7 +1163,7 @@ impl TweMusicApp {
         TopBottomPanel::top("top-app-bar")
             .exact_height(64.0)
             .show_separator_line(false)
-            .frame(Frame::none().fill(c.surface).inner_margin(Margin::symmetric(margin, 0.0)))
+            .frame(Frame::none().inner_margin(Margin::symmetric(margin, 0.0)))
             .show(ctx, |ui| {
                 ui.with_layout(Layout::left_to_right(Align::Center), |ui| {
                     let (rect, _) = ui.allocate_exact_size(vec2(32.0, 32.0), Sense::hover());
@@ -1232,7 +1206,7 @@ impl TweMusicApp {
             .exact_width(80.0)
             .resizable(false)
             .show_separator_line(false)
-            .frame(Frame::none().fill(c.surface).inner_margin(Margin::symmetric(0.0, 12.0)))
+            .frame(Frame::none().inner_margin(Margin::symmetric(0.0, 12.0)))
             .show(ctx, |ui| {
                 for (screen, icon, label) in Self::destinations() {
                     if m3::rail_destination(ui, icon, label, self.state.screen == screen).clicked() {
@@ -1244,10 +1218,11 @@ impl TweMusicApp {
 
     /// Navigation bar for compact windows.
     fn render_nav_bar(&mut self, ctx: &Context, c: &ColorScheme) {
+        let c_dark = ctx.style().visuals.dark_mode;
         TopBottomPanel::bottom("navigation-bar")
             .exact_height(80.0)
             .show_separator_line(false)
-            .frame(Frame::none().fill(c.surface_container))
+            .frame(Frame::none().fill(glass::glass_fill(c_dark)).stroke(glass::glass_edge(c_dark)))
             .show(ctx, |ui| {
                 ui.horizontal(|ui| {
                     ui.spacing_mut().item_spacing.x = 0.0;
@@ -1282,14 +1257,17 @@ impl TweMusicApp {
             .and_then(|track| track.thumbnail_url.clone());
         let loading = self.stream_rx.is_some() || self.loading_since.is_some();
         let mut seek_event = SeekEvent::Idle;
+        let dark = ctx.style().visuals.dark_mode;
+        let favorite = self.state.current_track().filter(|_| self.mpv.is_some()).cloned();
+        let favorite_on = favorite.as_ref().is_some_and(|track| self.library.is_liked(track));
+        let mut toggle_favorite = false;
 
         TopBottomPanel::bottom("player-panel")
             .show_separator_line(false)
-            .frame(Frame::none().fill(c.surface).inner_margin(Margin { left: margin, right: margin, top: 8.0, bottom: 8.0 }))
+            .frame(Frame::none().inner_margin(Margin { left: margin, right: margin, top: 8.0, bottom: 8.0 }))
             .show(ctx, |ui| {
-                Frame::none()
-                    .fill(c.surface_container_high)
-                    .rounding(Rounding::same(shape::EXTRA_LARGE_INCREASED))
+                glass::glass_frame(dark, shape::EXTRA_LARGE_INCREASED)
+                    .fill(theme::with_alpha(c.surface_container_high, 0.78))
                     .inner_margin(Margin::same(16.0))
                     .show(ui, |ui| {
                         ui.set_width(ui.available_width());
@@ -1302,7 +1280,7 @@ impl TweMusicApp {
                             }
 
                             // Room for previous (48) + play (64) + next (48) and their gaps.
-                            let text_width = (ui.available_width() - 12.0 - 48.0 - 64.0 - 48.0 - 32.0).max(60.0);
+                            let text_width = (ui.available_width() - 12.0 - 48.0 - 64.0 - 48.0 - 32.0 - 48.0).max(60.0);
                             ui.allocate_ui_with_layout(vec2(text_width, 64.0), Layout::top_down(Align::Min), |ui| {
                                 ui.spacing_mut().item_spacing.y = 0.0;
                                 ui.add(egui::Label::new(theme::text(Role::TitleMedium, &title).color(c.on_surface)).truncate().selectable(false));
@@ -1325,6 +1303,9 @@ impl TweMusicApp {
                                 if m3::icon_button_ex(ui, IconButtonKind::Tonal, Icon::Previous, false, can_prev, 48.0, "Previous").clicked() {
                                     self.skip(false);
                                 }
+                                if m3::icon_button_ex(ui, IconButtonKind::Standard, Icon::Heart, favorite_on, favorite.is_some(), 40.0, "Favorite").clicked() {
+                                    toggle_favorite = true;
+                                }
                             });
                         });
 
@@ -1345,6 +1326,13 @@ impl TweMusicApp {
                     });
             });
 
+        if toggle_favorite {
+            if let Some(track) = favorite {
+                let now_liked = self.library.toggle_like(&track);
+                self.save_library();
+                self.notify(if now_liked { "Added to Liked songs." } else { "Removed from Liked songs." });
+            }
+        }
         match seek_event {
             SeekEvent::Idle => {}
             SeekEvent::Dragging(value) => self.seek_drag = Some(value),
@@ -1368,9 +1356,11 @@ impl eframe::App for TweMusicApp {
         self.poll_tray(ctx);
         self.handle_close(ctx);
         self.poll_import();
+        self.poll_home();
         self.tick_player(ctx);
 
         let c = theme::colors_ctx(ctx);
+        glass::aurora(ctx, &c, ctx.style().visuals.dark_mode);
         let size = WindowSize::from_width(ctx.screen_rect().width());
         let margin = size.margin();
 
@@ -1384,7 +1374,7 @@ impl eframe::App for TweMusicApp {
 
         let content_rect = ctx.available_rect();
         CentralPanel::default()
-            .frame(Frame::none().fill(c.surface).inner_margin(Margin::symmetric(margin, 0.0)))
+            .frame(Frame::none().inner_margin(Margin::symmetric(margin, 0.0)))
             .show(ctx, |ui| match self.state.screen {
                 Screen::Home => self.render_home(ui),
                 Screen::Search => self.render_search(ui, ctx),
