@@ -62,6 +62,8 @@ struct TweMusicApp {
     stream_rx: Option<Receiver<Result<Stream, String>>>,
     /// The track whose stream is being resolved.
     pending_track: Option<Track>,
+    /// The song whose direct stream would not play, so it was retried through yt-dlp once.
+    direct_failed: Option<TrackId>,
     related_rx: Option<Receiver<Result<Vec<Track>, String>>>,
     /// The track the Up next list was last requested for, so it is fetched once per track.
     related_for: Option<TrackId>,
@@ -132,7 +134,7 @@ impl TweMusicApp {
         let mut app = Self {
             state: AppState::new(), search_rx: None, search_in_flight: false,
             mpv: None, player_message: None, snackbar: None,
-            ctx: ctx.clone(), stream_rx: None, pending_track: None, related_rx: None, related_for: None, last_poll: Instant::now(), position: None, duration: None,
+            ctx: ctx.clone(), stream_rx: None, pending_track: None, direct_failed: None, related_rx: None, related_for: None, last_poll: Instant::now(), position: None, duration: None,
             played_something: false, loading_since: None,
             library, library_path, selected_playlist: 0, new_playlist_name: String::new(),
             import_url: String::new(), import_rx: None,
@@ -680,7 +682,27 @@ impl TweMusicApp {
         } else if self.loading_since.is_some_and(|since| since.elapsed() > Duration::from_secs(2)) {
             self.loading_since = None;
             self.state.playback = PlaybackStatus::Stopped;
-            self.notify("Could not play this track. YouTube may have changed something; try again, or update TweMusic.".to_owned());
+            // YouTube sometimes hands out an address that then refuses to play (403). Retry
+            // once through yt-dlp, which handles that, before giving up.
+            let current = self.state.current_track.and_then(|id| self.state.tracks.iter().find(|track| track.id == id).cloned());
+            if let Some(track) = current {
+                let video_id = track.video_id.clone().filter(|id| ytmusic::youtube_music_url(id).is_some());
+                if let (Some(video_id), true) = (video_id, self.direct_failed != Some(track.id)) {
+                    self.direct_failed = Some(track.id);
+                    let browser = self.ytdlp_browser().unwrap_or_else(|| ytdlp::NO_SIGN_IN.to_owned());
+                    let (tx, rx) = mpsc::channel();
+                    let wake = self.ctx.clone();
+                    thread::spawn(move || {
+                        let _ = tx.send(ytdlp::resolve_after_direct_failure(&video_id, &browser));
+                        wake.request_repaint();
+                    });
+                    self.stream_rx = Some(rx);
+                    self.pending_track = Some(track.clone());
+                    self.player_message = Some(format!("Retrying {} another way…", track.title));
+                    return;
+                }
+            }
+            self.notify("Could not play this track, even through yt-dlp. Update yt-dlp (sudo pacman -Syu) and check that deno or node is installed.".to_owned());
         }
     }
 

@@ -86,6 +86,16 @@ fn wants_solver(stderr: &str) -> bool {
     ["n challenge", "challenge solving", "ejs", "solver"].iter().any(|hint| lower.contains(hint))
 }
 
+/// Asks yt-dlp for the stream because the direct address did not play (for example it was
+/// refused with 403 even though YouTube handed it out). Later tracks go straight to yt-dlp for a
+/// while. Blocks, so call it from a worker thread.
+pub fn resolve_after_direct_failure(video_id: &str, browser: &str) -> Result<Stream, String> {
+    if let Ok(mut slot) = BLOCKED_UNTIL.lock() {
+        *slot = Some(Instant::now() + SKIP_DIRECT_FOR);
+    }
+    via_ytdlp(video_id, if is_supported_browser(browser) { browser } else { NO_SIGN_IN })
+}
+
 fn via_ytdlp(video_id: &str, browser: &str) -> Result<Stream, String> {
     match attempt(video_id, browser, false) {
         Ok(stream) => Ok(stream),
