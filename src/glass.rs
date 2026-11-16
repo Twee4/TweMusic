@@ -111,6 +111,11 @@ pub fn glass_frame(dark: bool, radius: f32) -> egui::Frame {
 /// While it loads (or if it fails, e.g. offline) nothing is drawn, so the placeholder
 /// underneath stays visible and egui's warning glyph never appears.
 pub fn paint_album_art(ui: &Ui, url: &str, rect: Rect, radius: f32) {
+    paint_album_art_rounded(ui, url, rect, Rounding::same(radius));
+}
+
+/// Like [`paint_album_art`], with a separate radius for each corner.
+pub fn paint_album_art_rounded(ui: &Ui, url: &str, rect: Rect, rounding: Rounding) {
     let image = egui::Image::from_uri(url).show_loading_spinner(false);
     let Ok(egui::load::TexturePoll::Ready { texture }) = image.load_for_size(ui.ctx(), rect.size()) else {
         return;
@@ -125,7 +130,7 @@ pub fn paint_album_art(ui: &Ui, url: &str, rect: Rect, radius: f32) {
     };
     image
         .uv(Rect::from_min_max(pos2(inset_x, inset_y), pos2(1.0 - inset_x, 1.0 - inset_y)))
-        .rounding(Rounding::same(radius))
+        .rounding(rounding)
         .paint_at(ui, rect);
 }
 
@@ -360,6 +365,133 @@ pub fn dots(ui: &mut Ui, id: Id, count: usize, active: f32, c: &ColorScheme) -> 
         let _ = id;
     });
     clicked
+}
+
+// ---- Spotify-style Home components --------------------------------------------------
+
+fn text_galley(painter: &Painter, text: &str, size: f32, colour: Color32, wrap: f32, rows: usize) -> std::sync::Arc<egui::text::Galley> {
+    let mut job = LayoutJob::simple(text.to_owned(), FontId::proportional(size), colour, wrap.max(1.0));
+    job.wrap.max_rows = rows;
+    painter.layout_job(job)
+}
+
+/// Paints a galley with a faux bold (egui ships one weight).
+fn paint_bold(painter: &Painter, pos: Pos2, galley: std::sync::Arc<egui::text::Galley>, colour: Color32) {
+    painter.galley(pos + vec2(0.45, 0.0), galley.clone(), colour);
+    painter.galley(pos, galley, colour);
+}
+
+/// A compact filter chip ("All", "Energize", ...): subtle when idle, primary when selected.
+pub fn filter_chip(ui: &mut Ui, id: Id, label: &str, selected: bool, c: &ColorScheme) -> Response {
+    let galley = ui.painter().layout_no_wrap(label.to_owned(), FontId::proportional(14.0), c.on_surface);
+    let (rect, _) = ui.allocate_exact_size(vec2(galley.size().x + 32.0, 34.0), Sense::hover());
+    let response = m3::pointer_cursor(ui.interact(rect, id, Sense::click()), true);
+    let on = m3::spring(ui, id.with("on"), if selected { 1.0 } else { 0.0 }, motion::EFFECTS_DEFAULT).clamp(0.0, 1.0);
+    let press = m3::spring(ui, id.with("press"), if response.is_pointer_button_down_on() { 1.0 } else { 0.0 }, motion::SPATIAL_FAST);
+    if ui.is_rect_visible(rect) {
+        let shown = Rect::from_center_size(rect.center(), rect.size() * (1.0 - 0.04 * press).max(0.5));
+        let fill = mix(theme::with_alpha(c.on_surface, 0.10), c.primary, on);
+        let ink = mix(c.on_surface, c.on_primary, on);
+        let radius = shown.height() / 2.0;
+        ui.painter().rect_filled(shown, Rounding::same(radius), fill);
+        m3::state_layer(ui, shown, Rounding::same(radius), &response, ink, true);
+        let painter = ui.painter();
+        let text = painter.layout_no_wrap(label.to_owned(), FontId::proportional(14.0), ink);
+        paint_bold(painter, pos2(shown.center().x - text.size().x / 2.0, shown.center().y - text.size().y / 2.0), text, ink);
+    }
+    response
+}
+
+/// What a quick-access card shows.
+pub struct Shortcut<'a> {
+    pub title: &'a str,
+    pub art: Option<&'a str>,
+    pub seed: u64,
+    /// Liked songs: a heart on a gradient instead of artwork.
+    pub heart: bool,
+    pub playing: bool,
+}
+
+/// A wide, short card with square artwork on its left and a bold title (Spotify's quick access).
+pub fn shortcut_card(ui: &mut Ui, rect: Rect, id: Id, item: &Shortcut, c: &ColorScheme) -> Response {
+    let response = m3::pointer_cursor(ui.interact(rect, id, Sense::click()), true);
+    let press = m3::spring(ui, id.with("press"), if response.is_pointer_button_down_on() { 1.0 } else { 0.0 }, motion::SPATIAL_FAST);
+    let hover = m3::spring(ui, id.with("hover"), if response.hovered() { 1.0 } else { 0.0 }, motion::EFFECTS_DEFAULT).clamp(0.0, 1.0);
+    if !ui.is_rect_visible(rect) {
+        return response;
+    }
+    let shown = Rect::from_center_size(rect.center(), rect.size() * (1.0 - 0.03 * press).max(0.5));
+    let radius = m3::lerp(8.0, 12.0, press.clamp(0.0, 1.0));
+    let base = theme::with_alpha(c.surface_container_high, 0.90);
+    let fill = mix(base, theme::with_alpha(c.surface_container_highest, 0.98), hover);
+    let painter = ui.painter().clone();
+    painter.rect_filled(shown, Rounding::same(radius), fill);
+
+    let art = Rect::from_min_size(shown.min, vec2(shown.height(), shown.height()));
+    let left = Rounding { nw: radius, sw: radius, ne: 0.0, se: 0.0 };
+    if item.heart {
+        painter.rect_filled(art, left, mix(c.primary, c.tertiary, 0.55));
+        Icon::Heart.paint(&painter, art.center(), 26.0, Color32::WHITE, true);
+    } else {
+        painter.rect_filled(art, left, mix(c.primary_container, c.tertiary_container, (item.seed % 100) as f32 / 100.0));
+        Icon::Note.paint(&painter, art.center(), 24.0, theme::with_alpha(c.on_primary_container, 0.8), false);
+        if let Some(url) = item.art {
+            paint_album_art_rounded(ui, url, art, left);
+        }
+    }
+
+    let text_left = art.right() + 12.0;
+    let reserve = if item.playing { 40.0 } else { 12.0 };
+    let ink = if item.playing { c.primary } else { c.on_surface };
+    let galley = text_galley(&painter, item.title, 14.0, ink, shown.right() - reserve - text_left, 2);
+    let at = pos2(text_left, shown.center().y - galley.size().y / 2.0);
+    paint_bold(&painter, at, galley, ink);
+    if item.playing {
+        let bars = Rect::from_center_size(pos2(shown.right() - 22.0, shown.center().y), vec2(14.0, 14.0));
+        equaliser(&painter, bars, ui.input(|input| input.time), c.primary);
+        ui.ctx().request_repaint_after(std::time::Duration::from_millis(50));
+    }
+    response
+}
+
+/// What a shelf card shows.
+pub struct Shelf<'a> {
+    pub title: &'a str,
+    pub subtitle: &'a str,
+    pub art: Option<&'a str>,
+    pub seed: u64,
+    pub playing: bool,
+}
+
+/// A square artwork card with its title and subtitle underneath (a Spotify "shelf" item).
+pub fn shelf_card(ui: &mut Ui, size: f32, id: Id, item: &Shelf, c: &ColorScheme) -> Response {
+    let (rect, _) = ui.allocate_exact_size(vec2(size, size + 52.0), Sense::hover());
+    let response = m3::pointer_cursor(ui.interact(rect, id, Sense::click()), true);
+    let press = m3::spring(ui, id.with("press"), if response.is_pointer_button_down_on() { 1.0 } else { 0.0 }, motion::SPATIAL_FAST);
+    let lift = m3::spring(ui, id.with("lift"), if response.hovered() { 1.0 } else { 0.0 }, motion::SPATIAL_DEFAULT);
+    if !ui.is_rect_visible(rect) {
+        return response;
+    }
+    let art_slot = Rect::from_min_size(rect.min, vec2(size, size));
+    let art = Rect::from_center_size(art_slot.center(), art_slot.size() * (1.0 - 0.05 * press + 0.015 * lift).max(0.5));
+    let radius = m3::lerp(12.0, 18.0, press.clamp(0.0, 1.0));
+    let painter = ui.painter().clone();
+    placeholder_art(&painter, art, radius, item.seed, c);
+    if let Some(url) = item.art {
+        paint_album_art(ui, url, art, radius);
+    }
+    if item.playing {
+        let badge = Rect::from_min_size(pos2(art.right() - 34.0, art.bottom() - 34.0), vec2(26.0, 26.0));
+        painter.rect_filled(badge, Rounding::same(13.0), c.primary);
+        equaliser(&painter, badge.shrink2(vec2(7.0, 7.0)), ui.input(|input| input.time), c.on_primary);
+        ui.ctx().request_repaint_after(std::time::Duration::from_millis(50));
+    }
+    let ink = if item.playing { c.primary } else { c.on_surface };
+    let title = text_galley(&painter, item.title, 14.0, ink, size, 1);
+    paint_bold(&painter, pos2(rect.left(), rect.top() + size + 8.0), title, ink);
+    let subtitle = text_galley(&painter, item.subtitle, 12.5, c.on_surface_variant, size, 1);
+    painter.galley(pos2(rect.left(), rect.top() + size + 28.0), subtitle, c.on_surface_variant);
+    response
 }
 
 /// Convenience for sheets: a title row size.
