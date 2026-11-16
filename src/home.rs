@@ -272,13 +272,13 @@ impl TweMusicApp {
             .collect();
 
         ScrollArea::vertical().auto_shrink([false, false]).id_salt("home-scroll").show(ui, |ui| {
-            let width = ui.available_width().min(900.0);
+            let width = ui.available_width();
             ui.set_max_width(width);
             ui.add_space(4.0);
 
             // Greeting and the round buttons.
             ui.allocate_ui_with_layout(vec2(width, 52.0), Layout::left_to_right(Align::Center), |ui| {
-                ui.label(theme::text(Role::HeadlineSmall, hello).color(c.on_surface));
+                ui.label(theme::text(Role::HeadlineLarge, hello).color(c.on_surface));
                 ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                     ui.spacing_mut().item_spacing.x = 2.0;
                     if m3::icon_button(ui, IconButtonKind::Standard, Icon::User, false, "Profile and settings").clicked() {

@@ -928,28 +928,21 @@ impl TweMusicApp {
         let c = theme::colors(ui);
         Self::page_title(ui, "Library", "Liked songs and playlists are saved on this computer.");
 
-        ui.horizontal(|ui| {
-            let width = (ui.available_width() - 120.0).max(120.0);
-            m3::text_field(ui, &mut self.new_playlist_name, "New playlist name", width);
-            if m3::button(ui, ButtonKind::Tonal, "Create").clicked() {
-                match self.library.create(&self.new_playlist_name) {
-                    Some(index) => {
-                        self.selected_playlist = index;
-                        self.new_playlist_name.clear();
-                        self.save_library();
-                    }
-                    None => self.notify("Enter a playlist name that isn't already used."),
+        if Self::input_row(ui, &mut self.new_playlist_name, "New playlist name", "Create", true) {
+            match self.library.create(&self.new_playlist_name) {
+                Some(index) => {
+                    self.selected_playlist = index;
+                    self.new_playlist_name.clear();
+                    self.save_library();
                 }
+                None => self.notify("Enter a playlist name that isn't already used."),
             }
-        });
-        ui.horizontal(|ui| {
-            let width = (ui.available_width() - 120.0).max(120.0);
-            m3::text_field(ui, &mut self.import_url, "Import a public playlist link", width);
-            let idle = self.import_rx.is_none();
-            if m3::button_enabled(ui, ButtonKind::Tonal, "Import", idle).clicked() {
-                self.start_import(ctx);
-            }
-        });
+        }
+        ui.add_space(8.0);
+        let idle = self.import_rx.is_none();
+        if Self::input_row(ui, &mut self.import_url, "Import a public playlist link", "Import", idle) {
+            self.start_import(ctx);
+        }
         ui.add_space(8.0);
 
         if self.selected_playlist >= self.library.playlists.len() {
@@ -1006,6 +999,21 @@ impl TweMusicApp {
                 self.track_row(ui, track, index, tracks.len());
             }
         });
+    }
+
+    /// A text field with a button on its right. Every row gives the button the same slot,
+    /// so the fields and buttons of stacked rows line up.
+    fn input_row(ui: &mut egui::Ui, text: &mut String, hint: &str, label: &str, enabled: bool) -> bool {
+        const BUTTON_SLOT: f32 = 112.0;
+        let mut clicked = false;
+        ui.horizontal(|ui| {
+            let width = (ui.available_width() - BUTTON_SLOT - ui.spacing().item_spacing.x).max(120.0);
+            m3::text_field(ui, text, hint, width);
+            ui.allocate_ui_with_layout(vec2(BUTTON_SLOT, 40.0), Layout::top_down(Align::Center), |ui| {
+                clicked = m3::button_enabled(ui, ButtonKind::Tonal, label, enabled).clicked();
+            });
+        });
+        clicked
     }
 
     /// A settings row: title and description on the left, a switch on the right.
@@ -1236,6 +1244,9 @@ impl TweMusicApp {
                                 ui.add(egui::Label::new(theme::text(Role::BodyMedium, &status).color(c.on_surface_variant)).truncate().selectable(false));
                             });
 
+                            if m3::icon_button_ex(ui, IconButtonKind::Standard, Icon::Heart, favorite_on, favorite.is_some(), 40.0, "Favorite").clicked() {
+                                toggle_favorite = true;
+                            }
                             ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                                 ui.spacing_mut().item_spacing.x = 8.0;
                                 if m3::icon_button_ex(ui, IconButtonKind::Tonal, Icon::Next, false, can_next, 48.0, "Next").clicked() {
@@ -1251,9 +1262,6 @@ impl TweMusicApp {
                                 }
                                 if m3::icon_button_ex(ui, IconButtonKind::Tonal, Icon::Previous, false, can_prev, 48.0, "Previous").clicked() {
                                     self.skip(false);
-                                }
-                                if m3::icon_button_ex(ui, IconButtonKind::Standard, Icon::Heart, favorite_on, favorite.is_some(), 40.0, "Favorite").clicked() {
-                                    toggle_favorite = true;
                                 }
                             });
                         });
