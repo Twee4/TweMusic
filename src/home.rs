@@ -1,11 +1,12 @@
-//! The Home screen: a glass-and-aurora take on YouTube Music's home, with mood chips, a
-//! paged Speed dial, circular Mixes and a big Shuffle button.
+//! The Home screen, laid out like Spotify's: a greeting, filter chips, a two-column grid of
+//! quick-access cards and horizontal shelves of artwork, over the glass aurora backdrop.
 
 use std::{
     collections::{HashMap, HashSet},
+    process::Command,
     sync::mpsc::{self, Receiver, TryRecvError},
     thread,
-    time::{Duration, SystemTime, UNIX_EPOCH},
+    time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
 
 use eframe::egui::{
@@ -13,13 +14,13 @@ use eframe::egui::{
     Rounding, ScrollArea, Sense, Ui,
 };
 use twe_music::{
-    glass::{self, Tile},
+    glass::{self, Shelf, Shortcut},
     icons::Icon,
     library::{self, SavedTrack},
     m3::{self, IconButtonKind},
     models::{Screen, Track},
     state::PlaybackStatus,
-    theme::{self, motion, shape, ColorScheme, Role},
+    theme::{self, shape, ColorScheme, Role},
     ytmusic,
 };
 
@@ -71,17 +72,14 @@ enum Sheet {
     Activity,
 }
 
-enum MixSource {
+/// What a tap on Home should play.
+#[derive(Clone, Copy)]
+enum Play {
     Playlist(usize),
-    Recent,
-}
-
-struct Mix {
-    title: String,
-    subtitle: String,
-    art: Option<String>,
-    seed: u64,
-    source: MixSource,
+    /// A song from the quick-access pool (mood picks, or recent and liked songs).
+    Pool(usize),
+    History(usize),
+    Liked(usize),
 }
 
 /// Everything the Home screen remembers between frames.
@@ -90,10 +88,32 @@ pub(crate) struct HomeState {
     mood: Option<Mood>,
     moods: HashMap<Mood, Vec<Track>>,
     loading: Option<(Mood, Receiver<Result<Vec<Track>, String>>)>,
-    page: usize,
-    /// Horizontal pixels the Speed dial has been dragged since the finger went down.
-    drag: f32,
     sheet: Option<Sheet>,
+    /// The local hour of day and when it was read, for the greeting.
+    clock: Option<(u32, Instant)>,
+}
+
+/// The local hour (0-23). Rust's standard library has no time zones, so ask `date`;
+/// if that fails, fall back to UTC.
+fn local_hour() -> u32 {
+    let from_date = Command::new("date")
+        .arg("+%H")
+        .output()
+        .ok()
+        .and_then(|output| String::from_utf8(output.stdout).ok())
+        .and_then(|text| text.trim().parse::<u32>().ok())
+        .filter(|hour| *hour < 24);
+    from_date.unwrap_or_else(|| {
+        SystemTime::now().duration_since(UNIX_EPOCH).map(|since| ((since.as_secs() / 3600) % 24) as u32).unwrap_or(12)
+    })
+}
+
+fn greeting(hour: u32) -> &'static str {
+    match hour {
+        5..=11 => "Good morning",
+        12..=17 => "Good afternoon",
+        _ => "Good evening",
+    }
 }
 
 fn unix_day() -> u32 {
@@ -132,12 +152,9 @@ impl TweMusicApp {
     fn select_mood(&mut self, mood: Mood) {
         if self.home.mood == Some(mood) {
             self.home.mood = None;
-            self.home.page = 0;
             return;
         }
         self.home.mood = Some(mood);
-        self.home.page = 0;
-        self.home.drag = 0.0;
         let busy = self.home.loading.as_ref().is_some_and(|(loading, _)| *loading == mood);
         if self.home.moods.contains_key(&mood) || busy {
             return;
@@ -169,32 +186,6 @@ impl TweMusicApp {
             }
         }
         tracks
-    }
-
-    fn mixes(&self) -> Vec<Mix> {
-        let mut mixes = Vec::new();
-        for (index, playlist) in self.library.playlists.iter().enumerate() {
-            if playlist.tracks.is_empty() {
-                continue;
-            }
-            mixes.push(Mix {
-                title: playlist.name.clone(),
-                subtitle: format!("{} songs", playlist.tracks.len()),
-                art: playlist.tracks.iter().find_map(|saved| saved.thumbnail_url.clone()),
-                seed: index as u64 * 37 + 11,
-                source: MixSource::Playlist(index),
-            });
-        }
-        if !self.library.history.is_empty() {
-            mixes.push(Mix {
-                title: "Recently played".to_owned(),
-                subtitle: format!("{} songs", self.library.history.len()),
-                art: self.library.history.iter().find_map(|saved| saved.thumbnail_url.clone()),
-                seed: 73,
-                source: MixSource::Recent,
-            });
-        }
-        mixes
     }
 
     /// Queues `tracks` starting at `index` (the earlier ones follow at the end) and plays it.
@@ -240,25 +231,56 @@ impl TweMusicApp {
         }
     }
 
+    fn liked_tracks(&self) -> Vec<Track> {
+        self.library.playlists.first().map(|playlist| playlist.tracks.iter().map(SavedTrack::to_track).collect()).unwrap_or_default()
+    }
+
+    fn history_tracks(&self) -> Vec<Track> {
+        self.library.history.iter().map(SavedTrack::to_track).collect()
+    }
+
     pub(crate) fn render_home(&mut self, ui: &mut Ui) {
         let c = theme::colors(ui);
         let mut picked_mood = None;
-        let mut play_dial = None;
-        let mut play_mix = None;
+        let mut all = false;
+        let mut play = None;
         let mut shuffle = false;
         let mut open_sheet = None;
         let mut open_settings = false;
 
+        // The greeting only needs the hour, so look at the clock once a minute.
+        let stale = self.home.clock.map_or(true, |(_, read)| read.elapsed() > Duration::from_secs(60));
+        if stale {
+            self.home.clock = Some((local_hour(), Instant::now()));
+        }
+        let hello = greeting(self.home.clock.map_or(12, |(hour, _)| hour));
+
+        let playing_id = if self.state.playback == PlaybackStatus::Playing { self.state.current_track } else { None };
+        let pool = self.dial_tracks();
+        let history = self.history_tracks();
+        let liked = self.liked_tracks();
+        let playlists: Vec<(usize, String, usize, Option<String>)> = self
+            .library
+            .playlists
+            .iter()
+            .enumerate()
+            .filter(|(_, playlist)| !playlist.tracks.is_empty())
+            .map(|(index, playlist)| {
+                let art = playlist.tracks.iter().find_map(|saved| saved.thumbnail_url.clone());
+                (index, playlist.name.clone(), playlist.tracks.len(), art)
+            })
+            .collect();
+
         ScrollArea::vertical().auto_shrink([false, false]).id_salt("home-scroll").show(ui, |ui| {
-            let width = ui.available_width().min(820.0);
+            let width = ui.available_width().min(900.0);
             ui.set_max_width(width);
             ui.add_space(4.0);
 
-            // Header: the title, and what lives behind the little round buttons.
+            // Greeting and the round buttons.
             ui.allocate_ui_with_layout(vec2(width, 52.0), Layout::left_to_right(Align::Center), |ui| {
-                ui.label(theme::text(Role::HeadlineLarge, "Home").color(c.on_surface));
+                ui.label(theme::text(Role::HeadlineSmall, hello).color(c.on_surface));
                 ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                    ui.spacing_mut().item_spacing.x = 4.0;
+                    ui.spacing_mut().item_spacing.x = 2.0;
                     if m3::icon_button(ui, IconButtonKind::Standard, Icon::User, false, "Profile and settings").clicked() {
                         open_settings = true;
                     }
@@ -268,98 +290,120 @@ impl TweMusicApp {
                     if m3::icon_button(ui, IconButtonKind::Standard, Icon::History, false, "Recently played").clicked() {
                         open_sheet = Some(Sheet::History);
                     }
+                    if m3::icon_button(ui, IconButtonKind::Standard, Icon::Shuffle, false, "Shuffle all").clicked() {
+                        shuffle = true;
+                    }
                 });
             });
-            ui.add_space(8.0);
+            ui.add_space(6.0);
 
-            // Mood chips.
+            // Filter chips: All, then the moods.
             ScrollArea::horizontal()
                 .id_salt("home-moods")
                 .auto_shrink([false, true])
                 .scroll_bar_visibility(ScrollBarVisibility::AlwaysHidden)
                 .show(ui, |ui| {
                     ui.horizontal(|ui| {
-                        ui.spacing_mut().item_spacing.x = 10.0;
+                        ui.spacing_mut().item_spacing.x = 8.0;
+                        if glass::filter_chip(ui, Id::new("home-chip-all"), "All", self.home.mood.is_none(), &c).clicked() {
+                            all = true;
+                        }
                         for mood in Mood::ALL {
-                            let selected = self.home.mood == Some(mood);
-                            let id = Id::new(("home-mood", mood.label()));
-                            if glass::mood_chip(ui, id, mood.icon(), mood.label(), selected, &c).clicked() {
+                            let id = Id::new(("home-chip", mood.label()));
+                            if glass::filter_chip(ui, id, mood.label(), self.home.mood == Some(mood), &c).clicked() {
                                 picked_mood = Some(mood);
                             }
                         }
+                        if self.home.loading.is_some() {
+                            m3::loading_indicator(ui, 24.0);
+                        }
                     });
                 });
-            ui.add_space(22.0);
+            ui.add_space(16.0);
 
-            // Speed dial.
-            ui.horizontal(|ui| {
-                ui.label(theme::text(Role::TitleLarge, "Speed dial").color(c.on_surface));
-                if let Some(mood) = self.home.mood {
-                    ui.label(theme::text(Role::BodyMedium, format!("· {}", mood.label())).color(c.on_surface_variant));
+            // Quick access: two columns of short cards.
+            let mut quick: Vec<(String, Option<String>, u64, bool, Play)> = Vec::new();
+            if self.home.mood.is_none() {
+                for (index, name, _, art) in &playlists {
+                    quick.push((name.clone(), art.clone(), *index as u64 * 37 + 11, *index == 0, Play::Playlist(*index)));
                 }
-                if self.home.loading.is_some() {
-                    m3::loading_indicator(ui, 22.0);
-                }
-            });
-            ui.add_space(8.0);
-            let tracks = self.dial_tracks();
-            if tracks.is_empty() {
-                self.empty_dial(ui, width, &c);
+            }
+            for (index, track) in pool.iter().enumerate() {
+                quick.push((track.title.clone(), track.thumbnail_url.clone(), track.id.0, false, Play::Pool(index)));
+            }
+            quick.truncate(8);
+            if quick.is_empty() {
+                let message = if self.home.loading.is_some() {
+                    "Finding songs…"
+                } else {
+                    "Play something and it shows up here, or pick a mood above."
+                };
+                glass::glass_frame(ui.visuals().dark_mode, shape::EXTRA_LARGE).inner_margin(Margin::same(20.0)).show(ui, |ui| {
+                    ui.set_width(width - 40.0);
+                    ui.label(theme::text(Role::BodyLarge, message).color(c.on_surface_variant));
+                });
             } else {
-                play_dial = self.speed_dial(ui, width, &tracks, &c);
+                let gap = 8.0;
+                let columns = if width < 300.0 { 1 } else { 2 };
+                let card_width = (width - gap * (columns as f32 - 1.0)) / columns as f32;
+                let rows = quick.len().div_ceil(columns);
+                let (area, _) = ui.allocate_exact_size(vec2(width, rows as f32 * 56.0 + (rows as f32 - 1.0) * gap), Sense::hover());
+                for (slot, (title, art, seed, heart, action)) in quick.iter().enumerate() {
+                    let (row, column) = ((slot / columns) as f32, (slot % columns) as f32);
+                    let rect = Rect::from_min_size(
+                        area.min + vec2(column * (card_width + gap), row * (56.0 + gap)),
+                        vec2(card_width, 56.0),
+                    );
+                    let is_playing = match action {
+                        Play::Pool(index) => pool.get(*index).is_some_and(|track| Some(track.id) == playing_id),
+                        _ => false,
+                    };
+                    let item = Shortcut { title, art: art.as_deref(), seed: *seed, heart: *heart, playing: is_playing };
+                    if glass::shortcut_card(ui, rect, Id::new(("home-quick", slot, title.as_str())), &item, &c).clicked() {
+                        play = Some(*action);
+                    }
+                }
+            }
+            ui.add_space(26.0);
+
+            let card = if width < 420.0 { 132.0 } else { 156.0 };
+            // Shelves. With a mood chosen, its songs are the shelf; otherwise recents, playlists and likes.
+            if let Some(mood) = self.home.mood {
+                if pool.len() > 8 {
+                    let heading = format!("More {}", mood.label().to_lowercase());
+                    if let Some(index) = shelf(ui, &heading, card, "home-shelf-mood", pool.iter().skip(8), 8, playing_id, &c) {
+                        play = Some(Play::Pool(index));
+                    }
+                }
+            } else {
+                if let Some(index) = shelf(ui, "Recently played", card, "home-shelf-history", history.iter(), 0, playing_id, &c) {
+                    play = Some(Play::History(index));
+                }
+                if let Some(index) = playlist_shelf(ui, "Your playlists", card, &playlists, &c) {
+                    play = Some(Play::Playlist(index));
+                }
+                if let Some(index) = shelf(ui, "Jump back in", card, "home-shelf-liked", liked.iter(), 0, playing_id, &c) {
+                    play = Some(Play::Liked(index));
+                }
             }
             ui.add_space(24.0);
-
-            // Mixes.
-            ui.label(theme::text(Role::TitleLarge, "Mixes").color(c.on_surface));
-            ui.add_space(8.0);
-            let mixes = self.mixes();
-            if mixes.is_empty() {
-                ui.label(theme::text(Role::BodyMedium, "Like a song or make a playlist and your mixes appear here.").color(c.on_surface_variant));
-            } else {
-                let diameter = if width < 420.0 { 104.0 } else { 128.0 };
-                ScrollArea::horizontal()
-                    .id_salt("home-mixes")
-                    .auto_shrink([false, true])
-                    .scroll_bar_visibility(ScrollBarVisibility::AlwaysHidden)
-                    .show(ui, |ui| {
-                        ui.horizontal(|ui| {
-                            ui.spacing_mut().item_spacing.x = 16.0;
-                            for (index, mix) in mixes.iter().enumerate() {
-                                let id = Id::new(("home-mix", index));
-                                let response = glass::mix_disc(ui, diameter, id, &mix.title, &mix.subtitle, mix.art.as_deref(), mix.seed, &c);
-                                if response.clicked() {
-                                    play_mix = Some(index);
-                                }
-                            }
-                        });
-                    });
-            }
-            ui.add_space(24.0);
-
-            if glass::shuffle_button(ui, Id::new("home-shuffle"), "Shuffle", &c).clicked() {
-                shuffle = true;
-            }
-            ui.add_space(32.0);
         });
 
+        if all {
+            self.home.mood = None;
+        }
         if let Some(mood) = picked_mood {
-            self.select_mood(mood);
-        }
-        if let Some(index) = play_dial {
-            let tracks = self.dial_tracks();
-            self.play_from(tracks, index);
-        }
-        if let Some(index) = play_mix {
-            let mixes = self.mixes();
-            match mixes.get(index).map(|mix| &mix.source) {
-                Some(MixSource::Playlist(playlist)) => self.play_playlist(*playlist),
-                Some(MixSource::Recent) => {
-                    let tracks: Vec<Track> = self.library.history.iter().map(SavedTrack::to_track).collect();
-                    self.play_from(tracks, 0);
-                }
-                None => {}
+            // A chip that is already selected stays selected; "All" is what clears it.
+            if self.home.mood != Some(mood) {
+                self.select_mood(mood);
             }
+        }
+        match play {
+            Some(Play::Playlist(index)) => self.play_playlist(index),
+            Some(Play::Pool(index)) => self.play_from(pool, index),
+            Some(Play::History(index)) => self.play_from(history, index),
+            Some(Play::Liked(index)) => self.play_from(liked, index),
+            None => {}
         }
         if shuffle {
             self.shuffle_all();
@@ -371,82 +415,6 @@ impl TweMusicApp {
             self.home.sheet = open_sheet;
         }
         self.render_home_sheet(&ui.ctx().clone());
-    }
-
-    fn empty_dial(&self, ui: &mut Ui, width: f32, c: &ColorScheme) {
-        let dark = ui.visuals().dark_mode;
-        let message = if self.home.loading.is_some() {
-            "Finding songs…"
-        } else {
-            "Play something and it lands here, or pick a mood above."
-        };
-        glass::glass_frame(dark, shape::EXTRA_LARGE)
-            .inner_margin(Margin::same(20.0))
-            .show(ui, |ui| {
-                ui.set_width(width - 40.0);
-                ui.label(theme::text(Role::BodyLarge, message).color(c.on_surface_variant));
-            });
-    }
-
-    /// The paged 3×2 grid. Returns the song that was tapped.
-    fn speed_dial(&mut self, ui: &mut Ui, width: f32, tracks: &[Track], c: &ColorScheme) -> Option<usize> {
-        const PER_PAGE: usize = 6;
-        let gap = 12.0;
-        let tile = glass::tile_size(width, 3, gap);
-        let pages = tracks.len().div_ceil(PER_PAGE).max(1);
-        self.home.page = self.home.page.min(pages - 1);
-
-        let (pager, drag) = ui.allocate_exact_size(vec2(width, tile.y * 2.0 + gap), Sense::drag());
-        if drag.dragged() {
-            self.home.drag += drag.drag_delta().x;
-        }
-        if drag.drag_stopped() {
-            let threshold = width * 0.18;
-            if self.home.drag < -threshold && self.home.page + 1 < pages {
-                self.home.page += 1;
-            } else if self.home.drag > threshold && self.home.page > 0 {
-                self.home.page -= 1;
-            }
-            self.home.drag = 0.0;
-        }
-        let target = (self.home.page as f32 - self.home.drag / width).clamp(-0.25, pages as f32 - 0.75);
-        let spring = if drag.dragged() { motion::SPATIAL_FAST } else { motion::SPATIAL_DEFAULT };
-        let position = m3::spring(ui, Id::new("home-dial-position"), target, spring);
-
-        let playing_id = if self.state.playback == PlaybackStatus::Playing { self.state.current_track } else { None };
-        let old_clip = ui.clip_rect();
-        ui.set_clip_rect(pager.intersect(old_clip));
-        let mut tapped = None;
-        for page in 0..pages {
-            let offset = (page as f32 - position) * (width + gap);
-            if offset.abs() >= width + gap {
-                continue;
-            }
-            for slot in 0..PER_PAGE {
-                let index = page * PER_PAGE + slot;
-                let Some(track) = tracks.get(index) else { break };
-                let (row, column) = ((slot / 3) as f32, (slot % 3) as f32);
-                let min = pager.min + vec2(offset + column * (tile.x + gap), row * (tile.y + gap));
-                let rect = Rect::from_min_size(min, tile);
-                let data = Tile {
-                    title: &track.title,
-                    art: track.thumbnail_url.as_deref(),
-                    seed: track.id.0,
-                    playing: playing_id == Some(track.id),
-                };
-                if glass::speed_tile(ui, rect, Id::new(("home-tile", track.id.0)), &data, c).clicked() {
-                    tapped = Some(index);
-                }
-            }
-        }
-        ui.set_clip_rect(old_clip);
-
-        ui.add_space(6.0);
-        if let Some(page) = glass::dots(ui, Id::new("home-dots"), pages, position, c) {
-            self.home.page = page;
-            self.home.drag = 0.0;
-        }
-        tapped
     }
 
     /// The History and Activity sheets.
@@ -512,6 +480,78 @@ impl TweMusicApp {
             self.play_from(tracks, index);
         }
     }
+}
+
+/// A heading and a row of artwork cards that scrolls sideways. Returns the tapped card's
+/// position in `tracks` plus `offset`. Draws nothing when there are no songs.
+fn shelf<'a>(
+    ui: &mut Ui,
+    heading: &str,
+    card: f32,
+    id: &str,
+    tracks: impl Iterator<Item = &'a Track>,
+    offset: usize,
+    playing: Option<twe_music::models::TrackId>,
+    c: &ColorScheme,
+) -> Option<usize> {
+    let tracks: Vec<&Track> = tracks.take(15).collect();
+    if tracks.is_empty() {
+        return None;
+    }
+    let mut tapped = None;
+    ui.label(theme::text(Role::TitleLarge, heading).color(c.on_surface));
+    ui.add_space(10.0);
+    ScrollArea::horizontal()
+        .id_salt(id)
+        .auto_shrink([false, true])
+        .scroll_bar_visibility(ScrollBarVisibility::AlwaysHidden)
+        .show(ui, |ui| {
+            ui.horizontal(|ui| {
+                ui.spacing_mut().item_spacing.x = 14.0;
+                for (index, track) in tracks.iter().enumerate() {
+                    let item = Shelf {
+                        title: &track.title,
+                        subtitle: &track.artist,
+                        art: track.thumbnail_url.as_deref(),
+                        seed: track.id.0,
+                        playing: Some(track.id) == playing,
+                    };
+                    if glass::shelf_card(ui, card, Id::new((id, track.id.0)), &item, c).clicked() {
+                        tapped = Some(offset + index);
+                    }
+                }
+            });
+        });
+    ui.add_space(22.0);
+    tapped
+}
+
+/// The shelf of the user's playlists. Returns the tapped playlist's index in the library.
+fn playlist_shelf(ui: &mut Ui, heading: &str, card: f32, playlists: &[(usize, String, usize, Option<String>)], c: &ColorScheme) -> Option<usize> {
+    if playlists.is_empty() {
+        return None;
+    }
+    let mut tapped = None;
+    ui.label(theme::text(Role::TitleLarge, heading).color(c.on_surface));
+    ui.add_space(10.0);
+    ScrollArea::horizontal()
+        .id_salt("home-shelf-playlists")
+        .auto_shrink([false, true])
+        .scroll_bar_visibility(ScrollBarVisibility::AlwaysHidden)
+        .show(ui, |ui| {
+            ui.horizontal(|ui| {
+                ui.spacing_mut().item_spacing.x = 14.0;
+                for (index, name, count, art) in playlists {
+                    let subtitle = format!("Playlist · {count} songs");
+                    let item = Shelf { title: name, subtitle: &subtitle, art: art.as_deref(), seed: *index as u64 * 37 + 11, playing: false };
+                    if glass::shelf_card(ui, card, Id::new(("home-playlist", *index)), &item, c).clicked() {
+                        tapped = Some(*index);
+                    }
+                }
+            });
+        });
+    ui.add_space(22.0);
+    tapped
 }
 
 fn history_row(ui: &mut Ui, saved: &SavedTrack, index: usize, c: &ColorScheme) -> bool {
