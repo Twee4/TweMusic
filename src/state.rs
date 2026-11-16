@@ -21,14 +21,7 @@ pub struct AppState {
 
 impl AppState {
     pub fn new() -> Self {
-        let tracks = vec![
-            Track::new(1, "Midnight Echo", "Nova Lane", Some("After Hours"), 222),
-            Track::new(2, "Electric Bloom", "Iris City", Some("Glass Gardens"), 255),
-            Track::new(3, "Silver Skyline", "Red Harbor", Some("Northern Lights"), 178),
-            Track::new(4, "Night Shift", "Luna Kestrel", Some("After Hours"), 307),
-            Track::new(5, "Golden Thread", "Northline", Some("Small Wonders"), 206),
-            Track::new(6, "Moss and Neon", "Velvet Echo", Some("Soft Focus"), 282),
-        ];
+        let tracks: Vec<Track> = Vec::new();
         let queue = tracks.iter().map(|track| track.id).collect();
         Self {
             screen: Screen::Home,
@@ -168,9 +161,32 @@ impl Default for AppState {
 mod tests {
     use super::*;
 
+    fn song(id: u64, title: &str, artist: &str, album: &str) -> Track {
+        let mut track = Track::new(id, title, artist, Some(album), 100);
+        track.video_id = Some(format!("{id:011}"));
+        track
+    }
+
+    /// A state holding three queued songs.
+    fn state_with_songs() -> AppState {
+        let mut state = AppState::new();
+        state.add_search_results(vec![
+            song(1, "Midnight Echo", "Nova Lane", "After Hours"),
+            song(2, "Electric Bloom", "Iris City", "Glass Gardens"),
+            song(3, "Silver Skyline", "Red Harbor", "Soft Focus"),
+        ]);
+        state
+    }
+
+    #[test]
+    fn starts_empty() {
+        let state = AppState::new();
+        assert!(state.tracks.is_empty() && state.queue.is_empty());
+    }
+
     #[test]
     fn search_matches_title_artist_and_album_case_insensitively() {
-        let mut state = AppState::new();
+        let mut state = state_with_songs();
         for query in ["MIDNIGHT", "iris city", "soft focus"] {
             state.search_query = query.to_owned();
             assert_eq!(state.search_results().len(), 1, "query: {query}");
@@ -179,7 +195,7 @@ mod tests {
 
     #[test]
     fn playback_selects_track_and_advances_queue() {
-        let mut state = AppState::new();
+        let mut state = state_with_songs();
         state.play_track(TrackId(1));
         assert_eq!(state.playback, PlaybackStatus::Playing);
         state.next_track();
@@ -190,7 +206,7 @@ mod tests {
 
     #[test]
     fn playback_toggle_pauses_and_resumes() {
-        let mut state = AppState::new();
+        let mut state = state_with_songs();
         state.toggle_playback();
         assert_eq!(state.playback, PlaybackStatus::Playing);
         state.toggle_playback();
@@ -201,7 +217,7 @@ mod tests {
 
     #[test]
     fn set_queue_replaces_queue_and_returns_first() {
-        let mut state = AppState::new();
+        let mut state = state_with_songs();
         assert_eq!(state.set_queue(Vec::new()), None);
         let mut track = Track::new(300, "C", "Z", None, 10);
         track.video_id = Some("ccccccccccc".to_owned());
