@@ -10,7 +10,6 @@ TweMusic is a native Linux music player written in Rust, with a Material 3 Expre
 - **Dynamic colour:** the whole app takes its colours from the album art of the playing song. Turn it off in Settings.
 - **Material 3 design:** light and dark colour roles (follows your system, or pick one in Settings), Material type and shape scales, state layers, chips, list items, and an adaptive layout (navigation bar on narrow windows, navigation rail on wide ones). A glass look sits on a soft colour backdrop. Messages appear as snackbars.
 - **Linux integration:** media keys and desktop media widgets (MPRIS), a tray icon and track notifications.
-- **Local files:** play audio files from your computer with MPV.
 - **Fallback helper (optional):** if a direct lookup is refused, TweMusic can hand it to `yt-dlp` (install it together with `deno` or `node`). It runs without an account and TweMusic never stores or sends your cookies. Advanced: set `ytdlp_browser` in `settings.json` to `firefox`, `chrome`, `chromium`, `brave` or `vivaldi` to use that browser's session instead.
 
 TweMusic itself does not download or store audio. It relies on undocumented online services that can change at any time, which may need an update to TweMusic. Use it at your own risk and in line with the terms of the services you use and the law where you live.
