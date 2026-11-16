@@ -1,4 +1,4 @@
-use std::{fs, path::PathBuf, sync::mpsc::{self, Receiver, Sender, TryRecvError}, thread, time::{Duration, Instant}};
+use std::{path::PathBuf, sync::mpsc::{self, Receiver, Sender, TryRecvError}, thread, time::{Duration, Instant}};
 
 use eframe::egui::{
     self, pos2, vec2, Align, CentralPanel, Context, Frame, Layout, Margin, Rect, Rounding, ScrollArea,
@@ -53,7 +53,6 @@ struct TweMusicApp {
     search_rx: Option<Receiver<Result<Vec<Track>, String>>>,
     search_in_flight: bool,
     mpv: Option<MpvPlayer>,
-    local_file_path: String,
     /// Transient playback status shown in the player bar ("Loading…", "Paused").
     player_message: Option<String>,
     /// Feedback for user actions and errors, shown as a snackbar.
@@ -132,7 +131,7 @@ impl TweMusicApp {
         let (notice_tx, notice_rx) = mpsc::channel();
         let mut app = Self {
             state: AppState::new(), search_rx: None, search_in_flight: false,
-            mpv: None, local_file_path: String::new(), player_message: None, snackbar: None,
+            mpv: None, player_message: None, snackbar: None,
             ctx: ctx.clone(), stream_rx: None, pending_track: None, related_rx: None, related_for: None, last_poll: Instant::now(), position: None, duration: None,
             played_something: false, loading_since: None,
             library, library_path, selected_playlist: 0, new_playlist_name: String::new(),
@@ -725,46 +724,9 @@ impl TweMusicApp {
         }
     }
 
-    fn start_local_playback(&mut self) {
-        let input = self.local_file_path.trim();
-        if input.is_empty() {
-            self.notify("Enter a local audio file path first.".to_owned());
-            return;
-        }
-        let path = PathBuf::from(input);
-        let canonical = match fs::canonicalize(&path) {
-            Ok(path) if path.is_file() => path,
-            Ok(_) => { self.notify("The selected path is not a file.".to_owned()); return; }
-            Err(error) => { self.notify(format!("Cannot open file: {error}")); return; }
-        };
-        // A local file is not a YouTube stream: nothing to refresh or queue behind it.
-        self.stream_issued = None;
-        self.queued_next = None;
-        self.prefetch_rx = None;
-        self.refresh_rx = None;
-        if let Some(player) = &mut self.mpv {
-            match player.load_file(&canonical) {
-                Ok(()) => {
-                    self.state.playback = PlaybackStatus::Playing;
-                    self.player_message = Some(format!("Playing {}", canonical.display()));
-                }
-                Err(error) => self.notify(error.to_string()),
-            }
-        } else {
-            match MpvPlayer::start().and_then(|mut player| { player.load_file(&canonical)?; Ok(player) }) {
-                Ok(player) => {
-                    self.mpv = Some(player);
-                    self.state.playback = PlaybackStatus::Playing;
-                    self.player_message = Some(format!("Playing {}", canonical.display()));
-                }
-                Err(error) => self.notify(error.to_string()),
-            }
-        }
-    }
-
     fn toggle_local_playback(&mut self) {
         let Some(player) = &mut self.mpv else {
-            self.notify("Choose a local audio file in Settings to start playback.".to_owned());
+            self.notify("Pick a song to start playback.".to_owned());
             return;
         };
         match player.toggle_pause() {
@@ -1137,19 +1099,6 @@ impl TweMusicApp {
             });
             ui.add_space(12.0);
             m3::card(ui, CardKind::Filled, |ui| {
-                ui.label(theme::text(Role::TitleMedium, "Local audio playback").color(c.on_surface));
-                ui.label(theme::text(Role::BodyMedium, "Play a file from your device using MPV.").color(c.on_surface_variant));
-                ui.add_space(12.0);
-                ui.horizontal(|ui| {
-                    let width = (ui.available_width() - 130.0).max(120.0);
-                    m3::text_field(ui, &mut self.local_file_path, "/path/to/audio-file", width);
-                    if m3::button(ui, ButtonKind::Filled, "Play file").clicked() {
-                        self.start_local_playback();
-                    }
-                });
-            });
-            ui.add_space(12.0);
-            m3::card(ui, CardKind::Filled, |ui| {
                 ui.label(theme::text(Role::TitleMedium, "YouTube Music").color(c.on_surface));
                 ui.add_space(4.0);
                 ui.label(theme::text(Role::BodyMedium, "Search returns public metadata. Play asks YouTube for the audio stream only and plays it through MPV, so no video or ads load.").color(c.on_surface_variant));
@@ -1239,7 +1188,7 @@ impl TweMusicApp {
     fn render_player(&mut self, ctx: &Context, c: &ColorScheme, margin: f32) {
         let (title, subtitle) = match self.state.current_track() {
             Some(track) if self.mpv.is_some() => (track.title.clone(), track.artist.clone()),
-            _ if self.mpv.is_some() => ("Local audio player".to_owned(), "MPV".to_owned()),
+            _ if self.mpv.is_some() => ("Nothing playing".to_owned(), "Pick a song to start".to_owned()),
             _ => ("Nothing playing".to_owned(), "Search for a song to start".to_owned()),
         };
         let status = self.player_message.clone().unwrap_or(subtitle);
