@@ -61,17 +61,57 @@ pub fn resolve(video_id: &str, browser: Option<&str>) -> Result<Stream, String> 
     }
 }
 
+/// Why one yt-dlp run failed, and whether a second run with yt-dlp's downloadable
+/// challenge solver is worth trying.
+struct Attempt {
+    message: String,
+    needs_solver: bool,
+}
+
+impl From<String> for Attempt {
+    fn from(message: String) -> Self {
+        Self { message, needs_solver: false }
+    }
+}
+
+impl From<&str> for Attempt {
+    fn from(message: &str) -> Self {
+        Self::from(message.to_owned())
+    }
+}
+
+/// True when yt-dlp's error says its bundled challenge solver is missing or out of date.
+fn wants_solver(stderr: &str) -> bool {
+    let lower = stderr.to_ascii_lowercase();
+    ["n challenge", "challenge solving", "ejs", "solver"].iter().any(|hint| lower.contains(hint))
+}
+
 fn via_ytdlp(video_id: &str, browser: &str) -> Result<Stream, String> {
+    match attempt(video_id, browser, false) {
+        Ok(stream) => Ok(stream),
+        // YouTube changes its challenges often; yt-dlp can fetch a newer solver from its own
+        // repository when asked. That runs downloaded code, so only do it after a failure.
+        Err(first) if first.needs_solver => attempt(video_id, browser, true).map_err(|second| second.message),
+        Err(first) => Err(first.message),
+    }
+}
+
+fn attempt(video_id: &str, browser: &str, remote_solver: bool) -> Result<Stream, Attempt> {
     let url = ids::youtube_music_url(video_id).ok_or("YouTube returned an invalid video ID.")?;
-    let mut child = Command::new("yt-dlp")
-        // A user config could add options such as --exec; ignore it.
-        .args(["--ignore-config", "--no-playlist", "--no-warnings", "-j", "-f", "bestaudio/best"])
+    let mut command = Command::new("yt-dlp");
+    // A user config could add options such as --exec; ignore it.
+    command.args(["--ignore-config", "--no-playlist", "--no-warnings", "-j", "-f", "bestaudio/best"]);
+    if remote_solver {
+        command.args(["--remote-components", "ejs:github"]);
+    }
+    command
         .args(cookie_args(browser))
         .arg("--")
         .arg(&url)
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
+        .stderr(Stdio::piped());
+    let mut child = command
         .spawn()
         .map_err(|error| {
             if error.kind() == std::io::ErrorKind::NotFound {
@@ -100,17 +140,17 @@ fn via_ytdlp(video_id: &str, browser: &str) -> Result<Stream, String> {
             Ok(None) => {
                 let _ = child.kill();
                 let _ = child.wait();
-                return Err("yt-dlp took too long to answer.".to_owned());
+                return Err("yt-dlp took too long to answer.".into());
             }
-            Err(error) => return Err(format!("yt-dlp failed: {error}")),
+            Err(error) => return Err(format!("yt-dlp failed: {error}").into()),
         }
     };
     let output = out_reader.join().unwrap_or_default();
     let errors = err_reader.join().unwrap_or_default();
     if !status.success() {
-        return Err(describe_failure(&errors, browser));
+        return Err(Attempt { message: describe_failure(&errors, browser), needs_solver: wants_solver(&errors) });
     }
-    parse_output(&output)
+    Ok(parse_output(&output)?)
 }
 
 /// The yt-dlp options that choose where cookies come from: none for `NO_SIGN_IN`.
@@ -124,8 +164,10 @@ fn describe_failure(stderr: &str, browser: &str) -> String {
     let lower = last.to_ascii_lowercase();
     if lower.contains("cookie") || lower.contains("keyring") || lower.contains("database") {
         format!("yt-dlp could not read {browser}'s cookies. Close {browser} and check you are signed in to YouTube there.")
+    } else if lower.contains("javascript runtime") {
+        "yt-dlp needs deno or node to read YouTube. Install one (for example: sudo dnf install nodejs), then try again.".to_owned()
     } else if (lower.contains("not a bot") || lower.contains("sign in")) && browser == NO_SIGN_IN {
-        "YouTube still asked for sign-in. In Settings, pick a browser you are signed in to YouTube with.".to_owned()
+        "YouTube is challenging this connection. Try again later, switch networks, or turn off a VPN.".to_owned()
     } else if lower.contains("not a bot") || lower.contains("sign in") {
         format!("YouTube still asked for sign-in. Open music.youtube.com in {browser}, sign in, then try again.")
     } else if last.is_empty() {
@@ -197,7 +239,9 @@ mod tests {
 
     #[test]
     fn failure_text_is_readable() {
-        assert!(describe_failure("ERROR: Sign in to confirm you're not a bot", NO_SIGN_IN).contains("pick a browser"));
+        assert!(describe_failure("ERROR: Sign in to confirm you're not a bot", NO_SIGN_IN).contains("challenging this connection"));
+        assert!(describe_failure("ERROR: No supported JavaScript runtime could be found", NO_SIGN_IN).contains("deno or node"));
+        assert!(wants_solver("WARNING: n challenge solving failed") && wants_solver("ejs solver is outdated") && !wants_solver("ERROR: Video unavailable"));
         assert!(describe_failure("ERROR: could not find firefox cookies database", "firefox").contains("Close firefox"));
         assert!(describe_failure("ERROR: Sign in to confirm you're not a bot", "brave").contains("music.youtube.com"));
         assert!(describe_failure("", "firefox").contains("without an error message"));
