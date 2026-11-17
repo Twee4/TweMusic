@@ -189,16 +189,6 @@ impl TweMusicApp {
         ctx.send_viewport_cmd(egui::ViewportCommand::Close);
     }
 
-    /// What the Close buttons do: with the tray on, send the window to the tray so the music
-    /// keeps playing (like the window's own close button); without it, quit.
-    fn close_window(&mut self, ctx: &Context) {
-        if self.tray.is_some() {
-            ctx.send_viewport_cmd(egui::ViewportCommand::Minimized(true));
-        } else {
-            self.quit(ctx);
-        }
-    }
-
     fn show_window(ctx: &Context) {
         ctx.send_viewport_cmd(egui::ViewportCommand::Minimized(false));
         ctx.send_viewport_cmd(egui::ViewportCommand::Visible(true));
@@ -1120,7 +1110,7 @@ impl TweMusicApp {
                 ui.add_space(12.0);
                 changed |= Self::switch_row(
                     ui, &c, "Keep playing in the tray",
-                    "Closing the window, or the Close button in TweMusic, sends it to a tray icon with controls. Quit from the tray menu.",
+                    "Closing the window minimises it and shows a tray icon with controls. Quit from the tray menu.",
                     &mut tray_on,
                 );
                 ui.add_space(12.0);
@@ -1132,9 +1122,6 @@ impl TweMusicApp {
                             let _ = tx.send(error.unwrap_or_else(|| "Test notification sent.".to_owned()));
                             wake.request_repaint();
                         });
-                    }
-                    if m3::button(ui, ButtonKind::Tonal, "Close TweMusic").clicked() {
-                        self.close_window(ctx);
                     }
                 });
                 if changed {
@@ -1172,10 +1159,6 @@ impl TweMusicApp {
                     ui.add_space(8.0);
                     ui.label(theme::text(Role::HeadlineSmall, "TweMusic").color(c.on_surface));
                     ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                        let tip = if self.tray.is_some() { "Close to tray" } else { "Close TweMusic" };
-                        if m3::icon_button(ui, IconButtonKind::Standard, Icon::Close, false, tip).clicked() {
-                            self.close_window(ctx);
-                        }
                         let mode = match self.theme_pref {
                             ThemePreference::System => "system",
                             ThemePreference::Light => "light",
