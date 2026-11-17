@@ -8,6 +8,7 @@ use souvlaki::{MediaControlEvent, MediaPosition};
 mod home;
 
 use twe_music::{
+    desktop,
     glass::{self, paint_album_art},
     dynamic_color::{self, Transition},
     prefetch,
@@ -190,6 +191,12 @@ impl TweMusicApp {
     }
 
     fn show_window(ctx: &Context) {
+        if desktop::is_hyprland() {
+            // The commands take a moment, so keep them off the UI thread.
+            std::thread::spawn(|| {
+                desktop::show_window();
+            });
+        }
         ctx.send_viewport_cmd(egui::ViewportCommand::Minimized(false));
         ctx.send_viewport_cmd(egui::ViewportCommand::Visible(true));
         ctx.send_viewport_cmd(egui::ViewportCommand::Focus);
@@ -230,7 +237,14 @@ impl TweMusicApp {
     fn handle_close(&mut self, ctx: &Context) {
         if self.tray.is_some() && !self.quit_requested && ctx.input(|input| input.viewport().close_requested()) {
             ctx.send_viewport_cmd(egui::ViewportCommand::CancelClose);
-            ctx.send_viewport_cmd(egui::ViewportCommand::Minimized(true));
+            if desktop::is_hyprland() {
+                // Hyprland ignores minimise requests; move the window to a hidden workspace.
+                std::thread::spawn(|| {
+                    desktop::hide_window();
+                });
+            } else {
+                ctx.send_viewport_cmd(egui::ViewportCommand::Minimized(true));
+            }
         }
     }
 
