@@ -42,6 +42,8 @@ impl From<std::io::Error> for MpvError {
 pub struct MpvPlayer {
     child: Child,
     socket_path: PathBuf,
+    /// mpv's own log of warnings and errors, so a failure can be explained.
+    log_path: PathBuf,
     request_id: u64,
     /// The user agent last given to mpv, so it is only set again when it changes.
     user_agent: Option<String>,
@@ -51,6 +53,8 @@ impl MpvPlayer {
     pub fn start() -> Result<Self, MpvError> {
         let socket_path = std::env::temp_dir().join(format!("twe-music-mpv-{}.sock", std::process::id()));
         let _ = fs::remove_file(&socket_path);
+        let log_path = std::env::temp_dir().join(format!("twe-music-mpv-{}.log", std::process::id()));
+        let _ = fs::remove_file(&log_path);
         let child = Command::new("mpv")
             .args([
                 "--no-video",
@@ -58,14 +62,16 @@ impl MpvPlayer {
                 "--no-terminal",
                 "--force-window=no",
                 "--ytdl=no",
+                "--msg-level=all=warn",
             ])
             .arg(format!("--input-ipc-server={}", socket_path.display()))
+            .arg(format!("--log-file={}", log_path.display()))
             .stdin(Stdio::null())
             .stdout(Stdio::null())
             .stderr(Stdio::null())
             .spawn()
             .map_err(MpvError::NotInstalled)?;
-        let mut player = Self { child, socket_path, request_id: 0, user_agent: None };
+        let mut player = Self { child, socket_path, log_path, request_id: 0, user_agent: None };
         player.wait_for_socket()?;
         Ok(player)
     }
@@ -106,6 +112,13 @@ impl MpvPlayer {
 
     /// Index of the playing entry in mpv's playlist. It becomes 1 when a queued stream has
     /// taken over from the track before it.
+    /// The last error mpv logged, explained in plain words, if it logged one.
+    pub fn last_problem(&self) -> Option<String> {
+        let log = fs::read(&self.log_path).ok()?;
+        let tail = &log[log.len().saturating_sub(16 * 1024)..];
+        explain_log(&String::from_utf8_lossy(tail))
+    }
+
     pub fn playlist_pos(&mut self) -> Option<i64> {
         self.get_property("playlist-pos").ok()?.as_i64()
     }
@@ -207,5 +220,44 @@ impl Drop for MpvPlayer {
         let _ = self.command(json!(["quit"]));
         let _ = self.child.wait();
         let _ = fs::remove_file(&self.socket_path);
+        let _ = fs::remove_file(&self.log_path);
+    }
+}
+
+/// Picks the last error line from mpv's log and turns it into advice.
+pub fn explain_log(log: &str) -> Option<String> {
+    let line = log
+        .lines()
+        .rev()
+        .find(|line| line.contains("][e]") || line.to_ascii_lowercase().contains("failed"))?
+        .trim();
+    let lower = line.to_ascii_lowercase();
+    let advice = if lower.contains("[ao]") || lower.contains("audio output") || lower.contains("audio driver") {
+        "mpv could not open an audio output. Check that sound works, and on Arch install pipewire-pulse (or pipewire-alsa)."
+    } else if lower.contains("403") || lower.contains("forbidden") {
+        "The server refused the stream (HTTP 403). Update yt-dlp and try again."
+    } else if lower.contains("tls") || lower.contains("certificate") || lower.contains("ssl") {
+        "mpv could not make a secure connection. Check ca-certificates and your system clock."
+    } else if lower.contains("unrecognized file format") || lower.contains("no codec") || lower.contains("ffmpeg") {
+        "mpv could not decode this stream. Update mpv and ffmpeg (sudo pacman -Syu)."
+    } else {
+        let short: String = line.chars().take(140).collect();
+        return Some(format!("mpv said: {short}"));
+    };
+    Some(advice.to_owned())
+}
+
+#[cfg(test)]
+mod diagnosis_tests {
+    use super::explain_log;
+
+    #[test]
+    fn explains_common_mpv_failures() {
+        assert!(explain_log("[  0.10][e][ao] Failed to initialize audio driver 'pipewire'").unwrap().contains("audio output"));
+        assert!(explain_log("[  1.00][e][http] HTTP error 403 Forbidden").unwrap().contains("403"));
+        assert!(explain_log("[  1.00][e][tls] certificate verify failed").unwrap().contains("secure connection"));
+        assert!(explain_log("[  1.00][e][demux] something odd").unwrap().starts_with("mpv said:"));
+        assert_eq!(explain_log("[  0.10][w][cplayer] just a warning"), None);
+        assert_eq!(explain_log(""), None);
     }
 }
