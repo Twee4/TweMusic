@@ -301,7 +301,7 @@ impl TweMusicApp {
         if self.import_rx.is_some() { return; }
         let url = self.import_url.trim().to_owned();
         if !import::is_supported_playlist_url(&url) {
-            self.notify("Paste a public playlist link from music.youtube.com or youtube.com (it must contain list=).".to_owned());
+            self.notify("Paste a public playlist link (it must contain list=).".to_owned());
             return;
         }
         let (tx, rx) = mpsc::channel();
@@ -359,7 +359,7 @@ impl TweMusicApp {
     /// then handed to MPV by `poll_stream`.
     fn play_remote(&mut self, track: &Track) {
         let Some(video_id) = track.video_id.clone().filter(|id| ytmusic::youtube_music_url(id).is_some()) else {
-            self.notify("YouTube returned an invalid video ID.".to_owned());
+            self.notify("Invalid video ID.".to_owned());
             return;
         };
         let (tx, rx) = mpsc::channel();
@@ -730,7 +730,7 @@ impl TweMusicApp {
         let (tx, rx) = mpsc::channel();
         self.search_rx = Some(rx);
         self.search_in_flight = true;
-        self.state.search_message = Some("Searching YouTube Music…".to_owned());
+        self.state.search_message = Some("Searching…".to_owned());
         let repaint = ctx.clone();
         thread::spawn(move || {
             let result = ytmusic::search_tracks(&query).map_err(|error| error.to_string());
@@ -883,7 +883,7 @@ impl TweMusicApp {
                                 }
                             }
                             ui.separator();
-                            if ui.button("Open on YouTube Music").clicked() {
+                            if ui.button("Open in browser").clicked() {
                                 action = RowAction::OpenWeb;
                             }
                             if in_library_view && ui.button("Remove from this playlist").clicked() {
@@ -931,10 +931,10 @@ impl TweMusicApp {
             RowAction::OpenWeb => match track.video_id.as_deref().and_then(ytmusic::youtube_music_url) {
                 Some(url) => {
                     if let Err(error) = webbrowser::open(&url) {
-                        self.notify(format!("Could not open YouTube Music: {error}"));
+                        self.notify(format!("Could not open the page: {error}"));
                     }
                 }
-                None => self.notify("YouTube returned an invalid video ID."),
+                None => self.notify("Invalid video ID."),
             },
         }
         ui.add_space(2.0);
@@ -942,7 +942,7 @@ impl TweMusicApp {
 
     fn render_search(&mut self, ui: &mut egui::Ui, ctx: &Context) {
         let c = theme::colors(ui);
-        Self::page_title(ui, "Search", "Discover songs and artists on YouTube Music.");
+        Self::page_title(ui, "Search", "Discover songs and artists.");
         let result = m3::search_bar(ui, &mut self.state.search_query, "Search songs, artists, albums");
         if result.submitted {
             self.start_search(ctx);

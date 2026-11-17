@@ -9,7 +9,7 @@ use crate::{clients, ids, models::TrackInfo, parse, transport, InnerTubeError};
 /// network, so call it from a worker thread.
 pub fn up_next(video_id: &str) -> Result<Vec<TrackInfo>, InnerTubeError> {
     if ids::youtube_music_url(video_id).is_none() {
-        return Err(InnerTubeError::Api("YouTube returned an invalid video ID.".to_owned()));
+        return Err(InnerTubeError::Api("Invalid video ID.".to_owned()));
     }
     let profiles = clients::load();
     let usable = clients::eligible(&profiles, "browse");

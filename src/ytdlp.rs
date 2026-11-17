@@ -117,7 +117,7 @@ fn via_ytdlp(video_id: &str, browser: &str) -> Result<Stream, String> {
 }
 
 fn attempt(video_id: &str, browser: &str, remote_solver: bool) -> Result<Stream, Attempt> {
-    let url = ids::youtube_music_url(video_id).ok_or("YouTube returned an invalid video ID.")?;
+    let url = ids::youtube_music_url(video_id).ok_or("Invalid video ID.")?;
     let mut command = Command::new("yt-dlp");
     // A user config could add options such as --exec; ignore it.
     command.args(["--ignore-config", "--no-playlist", "--no-warnings", "-j", "-f", "bestaudio/best"]);
@@ -135,7 +135,7 @@ fn attempt(video_id: &str, browser: &str, remote_solver: bool) -> Result<Stream,
         .spawn()
         .map_err(|error| {
             if error.kind() == std::io::ErrorKind::NotFound {
-                "YouTube is blocking this connection and yt-dlp is not installed. Install yt-dlp (and deno or node) to sign in through your browser.".to_owned()
+                "This connection is being blocked and yt-dlp is not installed. Install yt-dlp (and deno or node) to sign in through your browser.".to_owned()
             } else {
                 format!("Could not start yt-dlp: {error}")
             }
@@ -183,13 +183,13 @@ fn describe_failure(stderr: &str, browser: &str) -> String {
     let last = stderr.lines().rev().find(|line| line.contains("ERROR")).unwrap_or("").trim();
     let lower = last.to_ascii_lowercase();
     if lower.contains("cookie") || lower.contains("keyring") || lower.contains("database") {
-        format!("yt-dlp could not read {browser}'s cookies. Close {browser} and check you are signed in to YouTube there.")
+        format!("yt-dlp could not read {browser}'s cookies. Close {browser} and check you are signed in there.")
     } else if lower.contains("javascript runtime") {
-        "yt-dlp needs deno or node to read YouTube. Install one (for example: sudo dnf install nodejs), then try again.".to_owned()
+        "yt-dlp needs deno or node to continue. Install one (for example: sudo dnf install nodejs), then try again.".to_owned()
     } else if (lower.contains("not a bot") || lower.contains("sign in")) && browser == NO_SIGN_IN {
-        "YouTube is challenging this connection. Try again later, switch networks, or turn off a VPN.".to_owned()
+        "This connection is being challenged. Try again later, switch networks, or turn off a VPN.".to_owned()
     } else if lower.contains("not a bot") || lower.contains("sign in") {
-        format!("YouTube still asked for sign-in. Open music.youtube.com in {browser}, sign in, then try again.")
+        format!("Sign-in was still requested. Sign in in {browser}, then try again.")
     } else if last.is_empty() {
         "yt-dlp failed without an error message.".to_owned()
     } else {
@@ -263,7 +263,7 @@ mod tests {
         assert!(describe_failure("ERROR: No supported JavaScript runtime could be found", NO_SIGN_IN).contains("deno or node"));
         assert!(wants_solver("WARNING: n challenge solving failed") && wants_solver("ejs solver is outdated") && !wants_solver("ERROR: Video unavailable"));
         assert!(describe_failure("ERROR: could not find firefox cookies database", "firefox").contains("Close firefox"));
-        assert!(describe_failure("ERROR: Sign in to confirm you're not a bot", "brave").contains("music.youtube.com"));
+        assert!(describe_failure("ERROR: Sign in to confirm you're not a bot", "brave").contains("Sign-in was still requested"));
         assert!(describe_failure("", "firefox").contains("without an error message"));
     }
 }

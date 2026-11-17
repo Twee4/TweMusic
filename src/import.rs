@@ -10,7 +10,7 @@ pub fn is_supported_playlist_url(url: &str) -> bool {
 /// Looks up the playlist and returns its title and tracks. Blocks on the network.
 pub fn import_playlist(url: &str) -> Result<(String, Vec<Track>), String> {
     let id = twe_innertube::browse::playlist_id_from_url(url.trim()).ok_or_else(|| {
-        "Paste a public playlist link from music.youtube.com or youtube.com (it must contain list=).".to_owned()
+        "Paste a public playlist link (it must contain list=).".to_owned()
     })?;
     let playlist = twe_innertube::browse::playlist(&id).map_err(|error| error.to_string())?;
     let tracks: Vec<Track> = playlist.tracks.into_iter().map(Track::from).collect();

@@ -20,11 +20,11 @@ pub enum InnerTubeError {
     #[error("Network error: {0}")]
     Http(#[from] reqwest::Error),
     /// YouTube answered but would not play the video (age gate, region, removed, ...).
-    #[error("YouTube refused: {0}")]
+    #[error("The service refused: {0}")]
     Refused(String),
     /// YouTube is asking this connection to prove it is not a bot ("Sign in to confirm you're
     /// not a bot"). It depends on the network address, so no client profile gets around it.
-    #[error("YouTube is asking this connection to prove it isn't a bot, so it won't hand out streams right now. This is about your network address, not TweMusic. Try again later, switch networks, or turn off a VPN.")]
+    #[error("The service is asking this connection to prove it isn't a bot, so it won't hand out streams right now. This is about your network address, not TweMusic. Try again later, switch networks, or turn off a VPN.")]
     BotCheck,
     #[error("No playable audio stream was found.")]
     NoFormat,
@@ -32,7 +32,7 @@ pub enum InnerTubeError {
     #[error("Could not decipher the stream address.")]
     CipherFailed,
     /// Every attempt failed before YouTube answered (no connection, DNS, timeout).
-    #[error("Could not reach YouTube. Check your internet connection.")]
+    #[error("Could not reach the service. Check your internet connection.")]
     Unreachable,
     #[error("{0}")]
     Api(String),
