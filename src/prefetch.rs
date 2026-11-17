@@ -3,8 +3,9 @@
 
 use std::time::Duration;
 
-/// Start resolving the next track this long before the current one ends.
-pub const PREFETCH_LEAD: f64 = 15.0;
+/// Start resolving the next track this long before the current one ends. Fresh stream addresses
+/// are refused for a few seconds, so this must leave room for that wait.
+pub const PREFETCH_LEAD: f64 = 30.0;
 /// Never prefetch for tracks shorter than this: the whole track is the lead time.
 const MIN_DURATION: f64 = 20.0;
 /// YouTube stream URLs last about six hours; refresh with an hour to spare.

@@ -42,6 +42,14 @@ pub fn is_supported_browser(name: &str) -> bool {
 /// Looks the track up directly; if YouTube's bot check refuses and `browser` is set, asks
 /// yt-dlp (signed in through that browser) instead. Blocks, so call it from a worker thread.
 pub fn resolve(video_id: &str, browser: Option<&str>) -> Result<Stream, String> {
+    let stream = find_stream(video_id, browser)?;
+    // Fresh addresses are refused for a few seconds; wait here, off the UI thread, so the
+    // player only ever opens an address that works.
+    twe_innertube::wait_until_playable(&stream);
+    Ok(stream)
+}
+
+fn find_stream(video_id: &str, browser: Option<&str>) -> Result<Stream, String> {
     let browser = browser.filter(|name| is_supported_browser(name));
     if let Some(browser) = browser {
         let blocked = BLOCKED_UNTIL.lock().ok().and_then(|slot| *slot).is_some_and(|until| Instant::now() < until);
@@ -93,7 +101,9 @@ pub fn resolve_after_direct_failure(video_id: &str, browser: &str) -> Result<Str
     if let Ok(mut slot) = BLOCKED_UNTIL.lock() {
         *slot = Some(Instant::now() + SKIP_DIRECT_FOR);
     }
-    via_ytdlp(video_id, if is_supported_browser(browser) { browser } else { NO_SIGN_IN })
+    let stream = via_ytdlp(video_id, if is_supported_browser(browser) { browser } else { NO_SIGN_IN })?;
+    twe_innertube::wait_until_playable(&stream);
+    Ok(stream)
 }
 
 fn via_ytdlp(video_id: &str, browser: &str) -> Result<Stream, String> {

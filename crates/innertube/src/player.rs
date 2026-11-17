@@ -24,6 +24,38 @@ pub struct Stream {
     pub bitrate: u64,
 }
 
+/// How long to keep asking before giving up on an address that still answers 403.
+const READY_PATIENCE: Duration = Duration::from_secs(14);
+
+/// YouTube now answers 403 for the first few seconds after it hands out a stream address
+/// (yt-dlp sleeps about six seconds before downloading for this reason). A player that opens
+/// the address at once fails, so ask for two bytes until the address starts working. Returns
+/// as soon as it does; on any other answer or error it returns too and lets the player decide.
+pub fn wait_until_playable(stream: &Stream) {
+    if !is_allowed_stream_url(&stream.url) {
+        return;
+    }
+    let Ok(http) = crate::transport::http_client() else { return };
+    let deadline = Instant::now() + READY_PATIENCE;
+    loop {
+        let answer = http
+            .get(&stream.url)
+            .header("User-Agent", stream.user_agent.as_str())
+            .header("Range", "bytes=0-1")
+            .send()
+            .map(|response| response.status().as_u16());
+        match answer {
+            Ok(status) if still_warming_up(status) && Instant::now() < deadline => std::thread::sleep(Duration::from_millis(1000)),
+            _ => return,
+        }
+    }
+}
+
+/// A 403 on a fresh address means "not yet"; anything else is final.
+fn still_warming_up(status: u16) -> bool {
+    status == 403
+}
+
 /// Only Google's media hosts over HTTPS are ever handed to MPV.
 pub fn is_allowed_stream_url(url: &str) -> bool {
     let Some(rest) = url.strip_prefix("https://") else { return false; };
@@ -193,6 +225,12 @@ mod tests {
     fn response(status: &str, formats: Value) -> Value {
         json!({ "playabilityStatus": { "status": status, "reason": "Sign in to confirm your age" },
                 "streamingData": { "adaptiveFormats": formats } })
+    }
+
+    #[test]
+    fn only_a_403_means_wait() {
+        assert!(still_warming_up(403));
+        assert!(!still_warming_up(200) && !still_warming_up(206) && !still_warming_up(404) && !still_warming_up(410));
     }
 
     #[test]
