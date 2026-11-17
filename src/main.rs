@@ -702,7 +702,11 @@ impl TweMusicApp {
                     return;
                 }
             }
-            self.notify("Could not play this track, even through yt-dlp. Update yt-dlp (sudo pacman -Syu) and check that deno or node is installed.".to_owned());
+            let reason = self.mpv.as_ref().and_then(|player| player.last_problem());
+            self.notify(match reason {
+                Some(reason) => format!("Could not play this track. {reason}"),
+                None => "Could not play this track, even through yt-dlp. Update yt-dlp (sudo pacman -Syu) and check that deno or node is installed.".to_owned(),
+            });
         }
     }
 
