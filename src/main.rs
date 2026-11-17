@@ -1110,7 +1110,7 @@ impl TweMusicApp {
                 ui.add_space(12.0);
                 changed |= Self::switch_row(
                     ui, &c, "Keep playing in the tray",
-                    "Closing the window minimises it and shows a tray icon with controls. Quit from the tray menu.",
+                    "The window's own close button hides it and shows a tray icon with controls. The Close button inside TweMusic closes it completely.",
                     &mut tray_on,
                 );
                 ui.add_space(12.0);
@@ -1123,7 +1123,7 @@ impl TweMusicApp {
                             wake.request_repaint();
                         });
                     }
-                    if m3::button(ui, ButtonKind::Tonal, "Quit TweMusic").clicked() {
+                    if m3::button(ui, ButtonKind::Tonal, "Close TweMusic").clicked() {
                         self.quit(ctx);
                     }
                 });
@@ -1162,7 +1162,7 @@ impl TweMusicApp {
                     ui.add_space(8.0);
                     ui.label(theme::text(Role::HeadlineSmall, "TweMusic").color(c.on_surface));
                     ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                        if m3::icon_button(ui, IconButtonKind::Standard, Icon::Power, false, "Quit TweMusic").clicked() {
+                        if m3::icon_button(ui, IconButtonKind::Standard, Icon::Close, false, "Close TweMusic").clicked() {
                             self.quit(ctx);
                         }
                         let mode = match self.theme_pref {
