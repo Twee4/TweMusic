@@ -39,6 +39,11 @@ impl From<std::io::Error> for MpvError {
 }
 
 
+/// How long a property read waits for mpv. These run on the UI thread twice a second.
+const POLL_TIMEOUT: Duration = Duration::from_millis(250);
+/// After a read times out, skip property reads for this long.
+const BUSY_BACKOFF: Duration = Duration::from_millis(1500);
+
 pub struct MpvPlayer {
     child: Child,
     socket_path: PathBuf,
@@ -47,6 +52,9 @@ pub struct MpvPlayer {
     request_id: u64,
     /// The user agent last given to mpv, so it is only set again when it changes.
     user_agent: Option<String>,
+    /// While mpv is not answering (for example it is busy opening a stream), property reads
+    /// fail at once until this time, so the window never freezes waiting for it.
+    busy_until: Option<Instant>,
 }
 
 impl MpvPlayer {
@@ -71,7 +79,7 @@ impl MpvPlayer {
             .stderr(Stdio::null())
             .spawn()
             .map_err(MpvError::NotInstalled)?;
-        let mut player = Self { child, socket_path, log_path, request_id: 0, user_agent: None };
+        let mut player = Self { child, socket_path, log_path, request_id: 0, user_agent: None, busy_until: None };
         player.wait_for_socket()?;
         Ok(player)
     }
@@ -110,8 +118,6 @@ impl MpvPlayer {
         Ok(())
     }
 
-    /// Index of the playing entry in mpv's playlist. It becomes 1 when a queued stream has
-    /// taken over from the track before it.
     /// The last error mpv logged, explained in plain words, if it logged one.
     pub fn last_problem(&self) -> Option<String> {
         let log = fs::read(&self.log_path).ok()?;
@@ -119,6 +125,8 @@ impl MpvPlayer {
         explain_log(&String::from_utf8_lossy(tail))
     }
 
+    /// Index of the playing entry in mpv's playlist. It becomes 1 when a queued stream has
+    /// taken over from the track before it.
     pub fn playlist_pos(&mut self) -> Option<i64> {
         self.get_property("playlist-pos").ok()?.as_i64()
     }
@@ -135,8 +143,15 @@ impl MpvPlayer {
 
     /// Reads an MPV property. An unavailable property (nothing loaded yet) is `Value::Null`.
     pub fn get_property(&mut self, name: &str) -> Result<Value, MpvError> {
-        match self.request(json!(["get_property", name])) {
+        if self.busy_until.is_some_and(|until| Instant::now() < until) {
+            return Err(MpvError::IpcUnavailable("mpv is busy".to_owned()));
+        }
+        match self.request_within(json!(["get_property", name]), POLL_TIMEOUT) {
             Ok(response) => Ok(response.get("data").cloned().unwrap_or(Value::Null)),
+            Err(MpvError::Io(error)) if matches!(error.kind(), std::io::ErrorKind::WouldBlock | std::io::ErrorKind::TimedOut) => {
+                self.busy_until = Some(Instant::now() + BUSY_BACKOFF);
+                Err(MpvError::IpcUnavailable("mpv did not answer in time".to_owned()))
+            }
             Err(MpvError::InvalidResponse(message)) if message.contains("property unavailable") => Ok(Value::Null),
             Err(error) => Err(error),
         }
@@ -191,10 +206,14 @@ impl MpvPlayer {
     }
 
     fn request(&mut self, command: Value) -> Result<Value, MpvError> {
+        self.request_within(command, Duration::from_secs(2))
+    }
+
+    fn request_within(&mut self, command: Value, timeout: Duration) -> Result<Value, MpvError> {
         self.request_id = self.request_id.wrapping_add(1);
         let id = self.request_id;
         let mut stream = UnixStream::connect(&self.socket_path)?;
-        stream.set_read_timeout(Some(Duration::from_secs(2)))?;
+        stream.set_read_timeout(Some(timeout))?;
         stream.write_all(json!({ "command": command, "request_id": id }).to_string().as_bytes())?;
         stream.write_all(b"\n")?;
         let mut reader = BufReader::new(stream);
