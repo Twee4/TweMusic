@@ -2,7 +2,7 @@
 name = "twe_innertube"
 version = "0.1.0"
 edition = "2021"
-description = "Pure-Rust access to YouTube's InnerTube player API for TweMusic (no UI, no player)"
+description = "Pure-Rust access to the InnerTube player API for TweMusic (no UI, no player)"
 license = "MIT"
 
 [dependencies]

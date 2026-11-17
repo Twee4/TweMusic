@@ -2,7 +2,7 @@
 name = "twe_music"
 version = "0.1.0"
 edition = "2021"
-description = "A native Linux YouTube Music client built in Rust with a Material 3-inspired interface"
+description = "A native Linux music player built in Rust with a Material 3-inspired interface"
 license = "MIT"
 
 [dependencies]

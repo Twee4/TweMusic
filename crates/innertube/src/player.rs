@@ -135,7 +135,7 @@ pub fn resolve(video_id: &str) -> Result<Stream, InnerTubeError> {
 
 pub fn resolve_with(video_id: &str, profiles: &[ClientProfile]) -> Result<Stream, InnerTubeError> {
     if ids::youtube_music_url(video_id).is_none() {
-        return Err(InnerTubeError::Api("YouTube returned an invalid video ID.".to_owned()));
+        return Err(InnerTubeError::Api("Invalid video ID.".to_owned()));
     }
     let http = transport::http_client()?;
     let visitor_data = cached_visitor_data(&http);
@@ -215,7 +215,7 @@ pub fn summarize_failures(failures: Vec<(String, InnerTubeError)>) -> InnerTubeE
         .find(|(_, error)| !matches!(error, InnerTubeError::Http(_)))
         .map(|(label, error)| format!("{label}: {error}"))
         .unwrap_or_else(|| "no client answered".to_owned());
-    InnerTubeError::Api(format!("Could not get a stream from YouTube ({detail})."))
+    InnerTubeError::Api(format!("Could not get a stream ({detail})."))
 }
 
 #[cfg(test)]
