@@ -1031,13 +1031,18 @@ impl TweMusicApp {
     /// so the fields and buttons of stacked rows line up.
     fn input_row(ui: &mut egui::Ui, text: &mut String, hint: &str, label: &str, enabled: bool) -> bool {
         const BUTTON_SLOT: f32 = 112.0;
+        // The text field's own padding (16 on each side) is added to the width it is given.
+        const FIELD_PADDING: f32 = 32.0;
         let mut clicked = false;
-        ui.horizontal(|ui| {
-            let width = (ui.available_width() - BUTTON_SLOT - ui.spacing().item_spacing.x).max(120.0);
-            m3::text_field(ui, text, hint, width);
+        let spacing = ui.spacing().item_spacing.x;
+        // Lay the row out from the right: the button slot first, then the field takes
+        // exactly what is left, so the row can never be wider than the page.
+        ui.allocate_ui_with_layout(vec2(ui.available_width(), 48.0), Layout::right_to_left(Align::Center), |ui| {
             ui.allocate_ui_with_layout(vec2(BUTTON_SLOT, 40.0), Layout::top_down(Align::Center), |ui| {
                 clicked = m3::button_enabled(ui, ButtonKind::Tonal, label, enabled).clicked();
             });
+            let width = (ui.available_width() - spacing - FIELD_PADDING).max(80.0);
+            m3::text_field(ui, text, hint, width);
         });
         clicked
     }
@@ -1046,7 +1051,9 @@ impl TweMusicApp {
     /// Returns true when the switch was toggled.
     fn switch_row(ui: &mut egui::Ui, c: &ColorScheme, title: &str, description: &str, on: &mut bool) -> bool {
         let mut changed = false;
-        ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+        // A fixed-height row: a bare `with_layout` would take all the height left on the page
+        // and stretch the card around it.
+        ui.allocate_ui_with_layout(vec2(ui.available_width(), 56.0), Layout::right_to_left(Align::Center), |ui| {
             changed = m3::switch(ui, on).changed();
             ui.with_layout(Layout::top_down(Align::Min), |ui| {
                 ui.label(theme::text(Role::BodyLarge, title).color(c.on_surface));
