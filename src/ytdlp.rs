@@ -259,7 +259,7 @@ mod tests {
 
     #[test]
     fn failure_text_is_readable() {
-        assert!(describe_failure("ERROR: Sign in to confirm you're not a bot", NO_SIGN_IN).contains("challenging this connection"));
+        assert!(describe_failure("ERROR: Sign in to confirm you're not a bot", NO_SIGN_IN).contains("being challenged"));
         assert!(describe_failure("ERROR: No supported JavaScript runtime could be found", NO_SIGN_IN).contains("deno or node"));
         assert!(wants_solver("WARNING: n challenge solving failed") && wants_solver("ejs solver is outdated") && !wants_solver("ERROR: Video unavailable"));
         assert!(describe_failure("ERROR: could not find firefox cookies database", "firefox").contains("Close firefox"));
