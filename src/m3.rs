@@ -309,7 +309,7 @@ pub fn text_field(ui: &mut Ui, text: &mut String, hint: &str, width: f32) -> Res
     )
 }
 
-#[derive(Debug, Default, Clone, Copy)]
+#[derive(Debug, Clone, Copy)]
 pub struct SearchBarResult {
     /// Enter was pressed in the field.
     pub submitted: bool,
@@ -327,7 +327,7 @@ pub fn search_bar(ui: &mut Ui, text: &mut String, hint: &str) -> SearchBarResult
     let (rect, _) = ui.allocate_exact_size(vec2(ui.available_width(), 56.0), Sense::hover());
     ui.painter().rect_filled(rect, shape::full(), c.surface_container_high);
 
-    let mut result = SearchBarResult { rect, ..Default::default() };
+    let mut result = SearchBarResult { submitted: false, rect };
     let mut focused = false;
     let inner = rect.shrink2(vec2(8.0, 0.0));
     ui.allocate_new_ui(
