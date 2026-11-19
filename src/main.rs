@@ -53,6 +53,10 @@ struct TweMusicApp {
     state: AppState,
     search_rx: Option<Receiver<Result<Vec<Track>, String>>>,
     search_in_flight: bool,
+    /// Whether the search box is showing (it collapses when you tap outside it).
+    search_open: bool,
+    /// Where the search page returns to when it closes with nothing to show.
+    search_return: Screen,
     mpv: Option<MpvPlayer>,
     /// Transient playback status shown in the player bar ("Loading…", "Paused").
     player_message: Option<String>,
@@ -133,7 +137,7 @@ impl TweMusicApp {
         let (tray_tx, tray_rx) = mpsc::channel();
         let (notice_tx, notice_rx) = mpsc::channel();
         let mut app = Self {
-            state: AppState::new(), search_rx: None, search_in_flight: false,
+            state: AppState::new(), search_rx: None, search_in_flight: false, search_open: false, search_return: Screen::Home,
             mpv: None, player_message: None, snackbar: None,
             ctx: ctx.clone(), stream_rx: None, pending_track: None, direct_failed: None, related_rx: None, related_for: None, last_poll: Instant::now(), position: None, duration: None,
             played_something: false, loading_since: None,
@@ -943,11 +947,25 @@ impl TweMusicApp {
     fn render_search(&mut self, ui: &mut egui::Ui, ctx: &Context) {
         let c = theme::colors(ui);
         Self::page_title(ui, "Search", "Discover songs and artists.");
-        let result = m3::search_bar(ui, &mut self.state.search_query, "Search songs, artists, albums");
-        if result.submitted {
-            self.start_search(ctx);
+        if self.search_open {
+            let result = m3::search_bar(ui, &mut self.state.search_query, "Search songs, artists, albums");
+            if result.submitted {
+                self.start_search(ctx);
+            }
+            // Tapping anywhere below the top bar but outside the box collapses it. This waits for
+            // the release, so a tap on a result still lands on that result before the list moves.
+            let released = ctx.input(|input| input.pointer.any_released());
+            let outside = ctx
+                .input(|input| input.pointer.interact_pos())
+                .is_some_and(|pos| pos.y > ui.max_rect().top() && !result.rect.contains(pos));
+            if released && outside {
+                self.search_open = false;
+                if self.state.remote_results.is_empty() && !self.search_in_flight {
+                    self.state.screen = self.search_return;
+                }
+            }
+            ui.add_space(8.0);
         }
-        ui.add_space(8.0);
         if let Some(message) = &self.state.search_message {
             ui.label(theme::text(Role::BodyMedium, message).color(c.on_surface_variant));
             ui.add_space(4.0);
@@ -1167,7 +1185,12 @@ impl TweMusicApp {
                     ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                         let searching = self.state.screen == Screen::Search;
                         if m3::icon_button(ui, IconButtonKind::Standard, Icon::Search, searching, "Search").clicked() {
-                            self.state.screen = Screen::Search;
+                            if !searching {
+                                self.search_return = self.state.screen;
+                                self.state.screen = Screen::Search;
+                            }
+                            self.search_open = true;
+                            ctx.memory_mut(|memory| memory.request_focus(egui::Id::new(m3::SEARCH_FIELD)));
                         }
                     });
                 });

@@ -313,7 +313,12 @@ pub fn text_field(ui: &mut Ui, text: &mut String, hint: &str, width: f32) -> Res
 pub struct SearchBarResult {
     /// Enter was pressed in the field.
     pub submitted: bool,
+    /// Where the bar was drawn, so callers can tell clicks inside from clicks outside.
+    pub rect: Rect,
 }
+
+/// The id of the search bar's text field, so the app can focus it.
+pub const SEARCH_FIELD: &str = "search-bar-field";
 
 /// A Material 3 search bar: 56dp tall, fully rounded, with a leading search icon button
 /// (which submits) and a clear button while there is text.
@@ -322,7 +327,7 @@ pub fn search_bar(ui: &mut Ui, text: &mut String, hint: &str) -> SearchBarResult
     let (rect, _) = ui.allocate_exact_size(vec2(ui.available_width(), 56.0), Sense::hover());
     ui.painter().rect_filled(rect, shape::full(), c.surface_container_high);
 
-    let mut result = SearchBarResult::default();
+    let mut result = SearchBarResult { rect, ..Default::default() };
     let mut focused = false;
     let inner = rect.shrink2(vec2(8.0, 0.0));
     ui.allocate_new_ui(
@@ -338,6 +343,7 @@ pub fn search_bar(ui: &mut Ui, text: &mut String, hint: &str) -> SearchBarResult
             let edit = ui.add(
                 egui::TextEdit::singleline(text)
                     .frame(false)
+                    .id(egui::Id::new(SEARCH_FIELD))
                     .font(Role::BodyLarge.font())
                     .hint_text(egui::RichText::new(hint).color(c.on_surface_variant))
                     .desired_width(edit_width)
