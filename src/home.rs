@@ -14,7 +14,7 @@ use eframe::egui::{
     Rounding, ScrollArea, Sense, Ui,
 };
 use twe_music::{
-    glass::{self, Shelf, Shortcut},
+    glass::{self, Pick, Shelf, Shortcut},
     icons::Icon,
     library::{self, SavedTrack},
     m3::{self, IconButtonKind},
@@ -23,6 +23,9 @@ use twe_music::{
     theme::{self, shape, ColorScheme, Role},
     ytmusic,
 };
+
+/// How long to wait before looking for today's pick again after a failed attempt.
+const PICK_RETRY: Duration = Duration::from_secs(120);
 
 use crate::TweMusicApp;
 
@@ -78,6 +81,10 @@ enum Play {
     Playlist(usize),
     /// A song from the quick-access pool (mood picks, or recent and liked songs).
     Pool(usize),
+    /// Today's pick itself.
+    Pick,
+    /// A song from the "More like today's pick" shelf.
+    PickMore(usize),
     History(usize),
     Liked(usize),
 }
@@ -91,6 +98,68 @@ pub(crate) struct HomeState {
     sheet: Option<Sheet>,
     /// The local hour of day and when it was read, for the greeting.
     clock: Option<(u32, Instant)>,
+    /// Today's date as yyyymmdd (local time), read together with the hour.
+    today: u32,
+    pick: Option<DailyPick>,
+    pick_loading: Option<Receiver<Result<DailyPick, String>>>,
+    /// When the last attempt to find today's pick failed.
+    pick_failed: Option<Instant>,
+}
+
+/// The song chosen for today, why, and similar songs fetched from search.
+#[derive(Clone)]
+pub(crate) struct DailyPick {
+    day: u32,
+    why: String,
+    track: Track,
+    more: Vec<Track>,
+}
+
+/// What to search for today's pick, and the reason shown to the user: one of the three artists
+/// heard most (history and likes), rotating by day; with no listening yet, a query for the hour.
+fn pick_plan(history: &[SavedTrack], liked: &[SavedTrack], day: u32, hour: u32) -> (String, String) {
+    let mut counts: Vec<(String, u32)> = Vec::new();
+    for saved in history.iter().chain(liked.iter()) {
+        let artist = saved.artist.split(',').next().unwrap_or("").trim();
+        if artist.is_empty() {
+            continue;
+        }
+        match counts.iter_mut().find(|(name, _)| name == artist) {
+            Some((_, count)) => *count += 1,
+            None => counts.push((artist.to_owned(), 1)),
+        }
+    }
+    counts.sort_by(|a, b| b.1.cmp(&a.1).then_with(|| a.0.cmp(&b.0)));
+    counts.truncate(3);
+    if !counts.is_empty() {
+        let artist = counts[day as usize % counts.len()].0.clone();
+        let why = format!("Because you listen to {artist}");
+        return (format!("{artist} songs"), why);
+    }
+    match hour {
+        5..=11 => ("morning acoustic songs".to_owned(), "For your morning".to_owned()),
+        12..=17 => ("feel good pop hits".to_owned(), "For your afternoon".to_owned()),
+        18..=22 => ("chill evening songs".to_owned(), "For your evening".to_owned()),
+        _ => ("late night lofi songs".to_owned(), "For tonight".to_owned()),
+    }
+}
+
+/// Searches for the pick and similar songs. Blocks on the network: call from a worker thread.
+fn fetch_pick(query: &str, why: String, day: u32, skip: &HashSet<String>) -> Result<DailyPick, String> {
+    let found: Vec<Track> = ytmusic::search_tracks(query)?.into_iter().filter(|track| track.video_id.is_some()).collect();
+    let fresh: Vec<&Track> = found.iter().filter(|track| track.video_id.as_ref().is_some_and(|id| !skip.contains(id))).collect();
+    let candidates = if fresh.is_empty() { found.iter().collect() } else { fresh };
+    if candidates.is_empty() {
+        return Err("No songs were found for today's pick.".to_owned());
+    }
+    let track = candidates[day as usize % candidates.len().min(5)].clone();
+    let mut more = ytmusic::related_tracks(track.video_id.as_deref().unwrap_or_default()).unwrap_or_default();
+    more.extend(found.iter().cloned());
+    let mut seen = HashSet::new();
+    seen.insert(track.id);
+    more.retain(|other| other.video_id.is_some() && seen.insert(other.id));
+    more.truncate(15);
+    Ok(DailyPick { day, why, track, more })
 }
 
 /// The local hour (0-23). Rust's standard library has no time zones, so ask `date`;
@@ -116,6 +185,18 @@ fn greeting(hour: u32) -> &'static str {
     }
 }
 
+/// Today's local date as yyyymmdd (the same fallbacks as `local_hour`: UTC day count).
+fn local_date() -> u32 {
+    Command::new("date")
+        .arg("+%Y%m%d")
+        .output()
+        .ok()
+        .and_then(|output| String::from_utf8(output.stdout).ok())
+        .and_then(|text| text.trim().parse::<u32>().ok())
+        .filter(|date| *date > 19_000_101)
+        .unwrap_or_else(|| unix_day().max(1))
+}
+
 fn unix_day() -> u32 {
     SystemTime::now().duration_since(UNIX_EPOCH).map(|since| (since.as_secs() / 86_400) as u32).unwrap_or(0)
 }
@@ -127,6 +208,7 @@ fn unix_seed() -> u64 {
 impl TweMusicApp {
     /// Receives a finished mood search.
     pub(crate) fn poll_home(&mut self) {
+        self.poll_pick();
         let Some((mood, receiver)) = &self.home.loading else { return };
         let mood = *mood;
         let result = match receiver.try_recv() {
@@ -146,6 +228,45 @@ impl TweMusicApp {
                 self.notify(error);
             }
         }
+    }
+
+    /// Receives a finished search for today's pick.
+    fn poll_pick(&mut self) {
+        let Some(receiver) = &self.home.pick_loading else { return };
+        let result = match receiver.try_recv() {
+            Ok(result) => result,
+            Err(TryRecvError::Empty) => return,
+            Err(TryRecvError::Disconnected) => Err("The search stopped unexpectedly.".to_owned()),
+        };
+        self.home.pick_loading = None;
+        match result {
+            Ok(pick) => {
+                self.home.pick = Some(pick);
+                self.home.pick_failed = None;
+            }
+            Err(_) => self.home.pick_failed = Some(Instant::now()),
+        }
+    }
+
+    /// Looks for today's pick when there is none for today yet (and not just after a failure).
+    fn ensure_pick(&mut self, hour: u32) {
+        let day = self.home.today;
+        let current = self.home.pick.as_ref().is_some_and(|pick| pick.day == day);
+        let retry_later = self.home.pick_failed.is_some_and(|failed| failed.elapsed() < PICK_RETRY);
+        if current || retry_later || self.home.pick_loading.is_some() {
+            return;
+        }
+        let liked: &[SavedTrack] = self.library.playlists.first().map(|playlist| playlist.tracks.as_slice()).unwrap_or(&[]);
+        let (query, why) = pick_plan(&self.library.history, liked, day, hour);
+        // Skip what was just heard, so the pick is something new.
+        let skip: HashSet<String> = self.library.history.iter().take(10).map(|saved| saved.video_id.clone()).collect();
+        let (tx, rx) = mpsc::channel();
+        let wake = self.ctx.clone();
+        thread::spawn(move || {
+            let _ = tx.send(fetch_pick(&query, why, day, &skip));
+            wake.request_repaint();
+        });
+        self.home.pick_loading = Some(rx);
     }
 
     /// Selects (or deselects) a mood and looks its songs up once.
@@ -253,7 +374,13 @@ impl TweMusicApp {
         if stale {
             self.home.clock = Some((local_hour(), Instant::now()));
         }
-        let hello = greeting(self.home.clock.map_or(12, |(hour, _)| hour));
+        let hour = self.home.clock.map_or(12, |(hour, _)| hour);
+        if stale || self.home.today == 0 {
+            self.home.today = local_date();
+        }
+        let hello = greeting(hour);
+        self.ensure_pick(hour);
+        let pick = self.home.pick.clone().filter(|pick| pick.day == self.home.today);
 
         let playing_id = if self.state.playback == PlaybackStatus::Playing { self.state.current_track } else { None };
         let pool = self.dial_tracks();
@@ -321,6 +448,33 @@ impl TweMusicApp {
                 });
             ui.add_space(16.0);
 
+            // Today's pick (only on "All"; a mood replaces the Home content).
+            if self.home.mood.is_none() {
+                if let Some(pick) = &pick {
+                    let (rect, _) = ui.allocate_exact_size(vec2(width, 148.0), Sense::hover());
+                    let item = Pick {
+                        kicker: "TODAY'S PICK",
+                        title: &pick.track.title,
+                        subtitle: &pick.track.artist,
+                        art: pick.track.thumbnail_url.as_deref(),
+                        seed: pick.track.id.0,
+                        playing: Some(pick.track.id) == playing_id,
+                    };
+                    if glass::pick_card(ui, rect, Id::new("home-pick"), &item, &c).clicked() {
+                        play = Some(Play::Pick);
+                    }
+                    ui.add_space(6.0);
+                    ui.label(theme::text(Role::BodyMedium, &pick.why).color(c.on_surface_variant));
+                    ui.add_space(16.0);
+                } else if self.home.pick_loading.is_some() {
+                    glass::glass_frame(ui.visuals().dark_mode, shape::EXTRA_LARGE).inner_margin(Margin::same(20.0)).show(ui, |ui| {
+                        ui.set_width(width - 40.0);
+                        ui.label(theme::text(Role::BodyLarge, "Finding today's pick…").color(c.on_surface_variant));
+                    });
+                    ui.add_space(16.0);
+                }
+            }
+
             // Quick access: two columns of short cards.
             let mut quick: Vec<(String, Option<String>, u64, bool, Play)> = Vec::new();
             if self.home.mood.is_none() {
@@ -376,6 +530,11 @@ impl TweMusicApp {
                     }
                 }
             } else {
+                if let Some(pick) = &pick {
+                    if let Some(index) = shelf(ui, "More like today's pick", card, "home-shelf-pick", pick.more.iter(), 0, playing_id, &c) {
+                        play = Some(Play::PickMore(index));
+                    }
+                }
                 if let Some(index) = shelf(ui, "Recently played", card, "home-shelf-history", history.iter(), 0, playing_id, &c) {
                     play = Some(Play::History(index));
                 }
@@ -401,6 +560,18 @@ impl TweMusicApp {
         match play {
             Some(Play::Playlist(index)) => self.play_playlist(index),
             Some(Play::Pool(index)) => self.play_from(pool, index),
+            Some(Play::Pick) => {
+                if let Some(pick) = pick {
+                    let mut queue = vec![pick.track.clone()];
+                    queue.extend(pick.more.iter().cloned());
+                    self.play_from(queue, 0);
+                }
+            }
+            Some(Play::PickMore(index)) => {
+                if let Some(pick) = pick {
+                    self.play_from(pick.more.iter().take(15).cloned().collect(), index);
+                }
+            }
             Some(Play::History(index)) => self.play_from(history, index),
             Some(Play::Liked(index)) => self.play_from(liked, index),
             None => {}
@@ -609,5 +780,43 @@ fn activity_chart(ui: &mut Ui, week: &[u32], today: u32, c: &ColorScheme) {
             FontId::proportional(13.0),
             if is_today { c.on_surface } else { c.on_surface_variant },
         );
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn saved(artist: &str) -> SavedTrack {
+        SavedTrack {
+            video_id: "abc123_XYZ0".to_owned(),
+            title: "Song".to_owned(),
+            artist: artist.to_owned(),
+            album: None,
+            duration_secs: 180,
+            thumbnail_url: None,
+        }
+    }
+
+    #[test]
+    fn pick_follows_the_most_played_artists() {
+        let history = vec![saved("A"), saved("A"), saved("B"), saved("A, C")];
+        let (query, why) = pick_plan(&history, &[], 0, 9);
+        assert_eq!(query, "A songs");
+        assert_eq!(why, "Because you listen to A");
+    }
+
+    #[test]
+    fn pick_rotates_between_top_artists_by_day() {
+        let history = vec![saved("A"), saved("A"), saved("B")];
+        let first = pick_plan(&history, &[], 0, 9).0;
+        let second = pick_plan(&history, &[], 1, 9).0;
+        assert_ne!(first, second);
+    }
+
+    #[test]
+    fn pick_without_history_follows_the_hour() {
+        assert_eq!(pick_plan(&[], &[], 5, 8).1, "For your morning");
+        assert_eq!(pick_plan(&[], &[], 5, 2).1, "For tonight");
     }
 }

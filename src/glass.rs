@@ -454,6 +454,66 @@ pub fn shortcut_card(ui: &mut Ui, rect: Rect, id: Id, item: &Shortcut, c: &Color
     response
 }
 
+/// What the "Today's pick" card shows.
+pub struct Pick<'a> {
+    pub kicker: &'a str,
+    pub title: &'a str,
+    pub subtitle: &'a str,
+    pub art: Option<&'a str>,
+    pub seed: u64,
+    pub playing: bool,
+}
+
+/// The large featured card at the top of Home: artwork on the left, a small label, the title and
+/// artist, and a round play button. Tapping anywhere on it plays.
+pub fn pick_card(ui: &mut Ui, rect: Rect, id: Id, item: &Pick, c: &ColorScheme) -> Response {
+    let response = m3::pointer_cursor(ui.interact(rect, id, Sense::click()), true);
+    let press = m3::spring(ui, id.with("press"), if response.is_pointer_button_down_on() { 1.0 } else { 0.0 }, motion::SPATIAL_FAST);
+    let hover = m3::spring(ui, id.with("hover"), if response.hovered() { 1.0 } else { 0.0 }, motion::EFFECTS_DEFAULT).clamp(0.0, 1.0);
+    if !ui.is_rect_visible(rect) {
+        return response;
+    }
+    let dark = ui.visuals().dark_mode;
+    let shown = Rect::from_center_size(rect.center(), rect.size() * (1.0 - 0.02 * press).max(0.5));
+    let radius = shape::EXTRA_LARGE;
+    let painter = ui.painter().clone();
+    let base = mix(theme::with_alpha(c.primary_container, 0.55), theme::with_alpha(c.primary_container, 0.75), hover);
+    painter.rect_filled(shown, Rounding::same(radius), glass_fill(dark));
+    painter.rect_filled(shown, Rounding::same(radius), base);
+    painter.rect_stroke(shown, Rounding::same(radius), glass_edge(dark));
+
+    let pad = 14.0;
+    let side = shown.height() - pad * 2.0;
+    let art = Rect::from_min_size(shown.min + vec2(pad, pad), vec2(side, side));
+    placeholder_art(&painter, art, 18.0, item.seed, c);
+    if let Some(url) = item.art {
+        paint_album_art(ui, url, art, 18.0);
+    }
+
+    let text_left = art.right() + 16.0;
+    let button = 48.0;
+    let text_width = shown.right() - pad - text_left;
+    let ink = c.on_primary_container;
+    let kicker = text_galley(&painter, item.kicker, 12.0, c.primary, text_width, 1);
+    let title = text_galley(&painter, item.title, 20.0, ink, text_width, 2);
+    let artist = text_galley(&painter, item.subtitle, 14.0, theme::with_alpha(ink, 0.75), (text_width - button - 8.0).max(40.0), 1);
+    let top = art.top() + 4.0;
+    paint_bold(&painter, pos2(text_left, top), kicker.clone(), c.primary);
+    let title_top = top + kicker.size().y + 6.0;
+    paint_bold(&painter, pos2(text_left, title_top), title.clone(), ink);
+    painter.galley(pos2(text_left, title_top + title.size().y + 4.0), artist, theme::with_alpha(ink, 0.75));
+
+    let badge = Rect::from_min_size(pos2(shown.right() - pad - button, shown.bottom() - pad - button), vec2(button, button));
+    painter.rect_filled(badge, Rounding::same(button / 2.0), c.primary);
+    if item.playing {
+        equaliser(&painter, badge.shrink2(vec2(15.0, 15.0)), ui.input(|input| input.time), c.on_primary);
+        ui.ctx().request_repaint_after(std::time::Duration::from_millis(50));
+    } else {
+        Icon::Play.paint(&painter, badge.center() + vec2(0.5, 0.0), 24.0, c.on_primary, true);
+    }
+    response
+}
+
 /// What a shelf card shows.
 pub struct Shelf<'a> {
     pub title: &'a str,
