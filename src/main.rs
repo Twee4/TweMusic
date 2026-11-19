@@ -1165,26 +1165,19 @@ impl TweMusicApp {
                     ui.add_space(8.0);
                     ui.label(theme::text(Role::HeadlineSmall, "TweMusic").color(c.on_surface));
                     ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                        let mode = match self.theme_pref {
-                            ThemePreference::System => "system",
-                            ThemePreference::Light => "light",
-                            ThemePreference::Dark => "dark",
-                        };
-                        let tooltip = format!("Theme: {mode} (click to change)");
-                        if m3::icon_button(ui, IconButtonKind::Standard, Icon::Contrast, false, &tooltip).clicked() {
-                            self.theme_pref = theme::next_preference(self.theme_pref);
-                            ctx.set_theme(self.theme_pref);
-                            theme::save_preference(self.theme_pref);
+                        let searching = self.state.screen == Screen::Search;
+                        if m3::icon_button(ui, IconButtonKind::Standard, Icon::Search, searching, "Search").clicked() {
+                            self.state.screen = Screen::Search;
                         }
                     });
                 });
             });
     }
 
-    fn destinations() -> [(Screen, Icon, &'static str); 4] {
+    /// The navigation items. Search is opened from the top bar instead.
+    fn destinations() -> [(Screen, Icon, &'static str); 3] {
         [
             (Screen::Home, Icon::Home, "Home"),
-            (Screen::Search, Icon::Search, "Search"),
             (Screen::Library, Icon::Library, "Library"),
             (Screen::Settings, Icon::Settings, "Settings"),
         ]
@@ -1216,7 +1209,7 @@ impl TweMusicApp {
             .show(ctx, |ui| {
                 ui.horizontal(|ui| {
                     ui.spacing_mut().item_spacing.x = 0.0;
-                    let width = ui.available_width() / 4.0;
+                    let width = ui.available_width() / Self::destinations().len() as f32;
                     for (screen, icon, label) in Self::destinations() {
                         if m3::bar_destination(ui, width, icon, label, self.state.screen == screen).clicked() {
                             self.state.screen = screen;
