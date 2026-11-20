@@ -81,9 +81,10 @@ pub fn glass_fill(dark: bool) -> Color32 {
     theme::with_alpha(Color32::WHITE, if dark { 0.08 } else { 0.55 })
 }
 
-/// The soft light edge of a glass surface.
-pub fn glass_edge(dark: bool) -> Stroke {
-    Stroke::new(1.0_f32, theme::with_alpha(Color32::WHITE, if dark { 0.16 } else { 0.8 }))
+/// The edge of a glass surface. There is no visible outline: the translucent fill and the shadow
+/// are enough to separate it.
+pub fn glass_edge(_dark: bool) -> Stroke {
+    Stroke::NONE
 }
 
 /// Shadow under floating glass.
