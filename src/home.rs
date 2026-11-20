@@ -398,7 +398,7 @@ impl TweMusicApp {
             })
             .collect();
 
-        ScrollArea::vertical().auto_shrink([false, false]).id_salt("home-scroll").show(ui, |ui| {
+        ScrollArea::vertical().auto_shrink([false, false]).id_salt("home-scroll").scroll_bar_visibility(ScrollBarVisibility::AlwaysHidden).show(ui, |ui| {
             let width = ui.available_width();
             ui.set_max_width(width);
             ui.add_space(4.0);
@@ -630,7 +630,7 @@ impl TweMusicApp {
                         if history.is_empty() {
                             ui.label(theme::text(Role::BodyMedium, "Songs you play will be listed here.").color(c.on_surface_variant));
                         }
-                        ScrollArea::vertical().max_height(360.0).auto_shrink([true, true]).show(ui, |ui| {
+                        ScrollArea::vertical().max_height(360.0).auto_shrink([true, true]).scroll_bar_visibility(ScrollBarVisibility::AlwaysHidden).show(ui, |ui| {
                             for (index, saved) in history.iter().enumerate() {
                                 if history_row(ui, saved, index, &c) {
                                     play = Some(index);
