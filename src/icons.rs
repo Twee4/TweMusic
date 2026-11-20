@@ -7,18 +7,33 @@ use std::f32::consts::PI;
 
 use eframe::egui::{vec2, Color32, Mesh, Painter, Pos2, Rect, Rounding, Shape, Stroke};
 
-/// A polyline with round caps and round joins (egui's own lines have square ends). Long, smooth
-/// paths only get round ends, since their joints are already smooth.
+/// A polyline with round caps and round joins. egui's own line stroker has square ends and draws
+/// long spikes at sharp corners, so short (cornered) paths are drawn segment by segment with a
+/// dot at every joint. Long, smooth paths (arcs) use one line and only get round ends.
 fn path(painter: &Painter, points: Vec<Pos2>, width: f32, color: Color32) {
-    let all = points.len() <= 8;
+    let cornered = points.len() <= 8;
     let last = points.len().saturating_sub(1);
     for (index, point) in points.iter().enumerate() {
-        if all || index == 0 || index == last {
+        if cornered || index == 0 || index == last {
             painter.circle_filled(*point, width / 2.0, color);
         }
     }
-    if points.len() >= 2 {
+    if cornered {
+        for pair in points.windows(2) {
+            painter.line_segment([pair[0], pair[1]], Stroke::new(width, color));
+        }
+    } else if points.len() >= 2 {
         painter.add(Shape::line(points, Stroke::new(width, color)));
+    }
+}
+
+/// A closed outline with round joins, drawn segment by segment so sharp points (the dip and tip
+/// of a heart, the ends of a crescent) stay clean instead of growing spikes.
+fn ring(painter: &Painter, points: &[Pos2], width: f32, color: Color32) {
+    for (index, point) in points.iter().enumerate() {
+        let next = points[(index + 1) % points.len()];
+        painter.line_segment([*point, next], Stroke::new(width, color));
+        painter.circle_filled(*point, width / 2.0, color);
     }
 }
 
@@ -94,7 +109,7 @@ impl Icon {
                 if filled {
                     painter.add(Shape::convex_polygon(outline.clone(), color, Stroke::NONE));
                 }
-                painter.add(Shape::closed_line(outline, stroke));
+                ring(painter, &outline, stroke_width, color);
             }
             Self::Search => {
                 painter.circle_stroke(at(10.0, 10.0), 6.0 * unit, stroke);
@@ -159,7 +174,7 @@ impl Icon {
                     }
                     painter.add(Shape::mesh(mesh));
                 }
-                painter.add(Shape::closed_line(outline, Stroke::new(2.0 * unit, color)));
+                ring(painter, &outline, 2.0 * unit, color);
             }
             Self::More => {
                 for y in [5.0, 12.0, 19.0] {
@@ -222,7 +237,7 @@ impl Icon {
                     &[at(13.0, 2.8), at(4.8, 13.8), at(11.0, 13.8), at(10.0, 21.2), at(19.2, 10.2), at(13.0, 10.2)],
                     1.3 * unit,
                 );
-                painter.add(Shape::closed_line(outline, stroke));
+                ring(painter, &outline, stroke_width, color);
             }
             Self::Moon => {
                 // A crescent: the part of a circle that lies outside a second, offset circle.
@@ -248,7 +263,7 @@ impl Icon {
                 }
                 let outline: Vec<Pos2> = outer.iter().chain(inner.iter()).map(|(x, y)| at(*x, *y)).collect();
                 if outline.len() > 2 {
-                    painter.add(Shape::closed_line(outline, stroke));
+                    ring(painter, &outline, stroke_width, color);
                 }
             }
             Self::Smile => {
