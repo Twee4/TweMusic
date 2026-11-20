@@ -120,6 +120,9 @@ struct TweMusicApp {
     listen_carry: f32,
 }
 
+/// Width of the navigation rail on medium and expanded windows.
+const NAV_RAIL_WIDTH: f32 = 80.0;
+
 impl TweMusicApp {
     fn new(ctx: Context) -> Self {
         theme::apply(&ctx);
@@ -1209,7 +1212,7 @@ impl TweMusicApp {
     /// Navigation rail for medium and expanded windows.
     fn render_nav_rail(&mut self, ctx: &Context, c: &ColorScheme) {
         SidePanel::left("navigation-rail")
-            .exact_width(80.0)
+            .exact_width(NAV_RAIL_WIDTH)
             .resizable(false)
             .show_separator_line(false)
             .frame(Frame::none().inner_margin(Margin::symmetric(0.0, 12.0)))
@@ -1242,7 +1245,7 @@ impl TweMusicApp {
             });
     }
 
-    fn render_player(&mut self, ctx: &Context, c: &ColorScheme, margin: f32) {
+    fn render_player(&mut self, ctx: &Context, c: &ColorScheme, margin: f32, right_margin: f32) {
         let (title, subtitle) = match self.state.current_track() {
             Some(track) if self.mpv.is_some() => (track.title.clone(), track.artist.clone()),
             _ if self.mpv.is_some() => ("Nothing playing".to_owned(), "Pick a song to start".to_owned()),
@@ -1270,7 +1273,7 @@ impl TweMusicApp {
 
         TopBottomPanel::bottom("player-panel")
             .show_separator_line(false)
-            .frame(Frame::none().inner_margin(Margin { left: margin, right: margin, top: 8.0, bottom: 8.0 }))
+            .frame(Frame::none().inner_margin(Margin { left: margin, right: right_margin, top: 8.0, bottom: 8.0 }))
             .show(ctx, |ui| {
                 glass::glass_frame(dark, shape::EXTRA_LARGE_INCREASED)
                     .fill(theme::with_alpha(c.surface_container_high, 0.78))
@@ -1369,6 +1372,9 @@ impl eframe::App for TweMusicApp {
         glass::aurora(ctx, &c, ctx.style().visuals.dark_mode);
         let size = WindowSize::from_width(ctx.screen_rect().width());
         let margin = size.margin();
+        // The navigation rail takes room on the left, so the right side gets the same room: the
+        // page then has equal space on both sides of the window.
+        let right_margin = if size == WindowSize::Compact { margin } else { margin + NAV_RAIL_WIDTH };
 
         self.render_top_bar(ctx, &c, margin);
         if size == WindowSize::Compact {
@@ -1376,11 +1382,11 @@ impl eframe::App for TweMusicApp {
         } else {
             self.render_nav_rail(ctx, &c);
         }
-        self.render_player(ctx, &c, margin);
+        self.render_player(ctx, &c, margin, right_margin);
 
         let content_rect = ctx.available_rect();
         CentralPanel::default()
-            .frame(Frame::none().inner_margin(Margin::symmetric(margin, 0.0)))
+            .frame(Frame::none().inner_margin(Margin { left: margin, right: right_margin, top: 0.0, bottom: 0.0 }))
             .show(ctx, |ui| match self.state.screen {
                 Screen::Home => self.render_home(ui),
                 Screen::Search => self.render_search(ui, ctx),
