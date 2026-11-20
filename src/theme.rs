@@ -352,9 +352,9 @@ impl WindowSize {
         }
     }
 
-    /// Page side margin: 16dp on compact windows, 24dp otherwise.
+    /// Page side margin: 20dp on compact windows, 32dp otherwise.
     pub fn margin(self) -> f32 {
-        if self == Self::Compact { 16.0 } else { 24.0 }
+        if self == Self::Compact { 20.0 } else { 32.0 }
     }
 }
 
@@ -550,8 +550,8 @@ mod tests {
         assert_eq!(WindowSize::from_width(600.0), WindowSize::Medium);
         assert_eq!(WindowSize::from_width(839.9), WindowSize::Medium);
         assert_eq!(WindowSize::from_width(840.0), WindowSize::Expanded);
-        assert_eq!(WindowSize::Compact.margin(), 16.0);
-        assert_eq!(WindowSize::Expanded.margin(), 24.0);
+        assert_eq!(WindowSize::Compact.margin(), 20.0);
+        assert_eq!(WindowSize::Expanded.margin(), 32.0);
     }
 
     #[test]

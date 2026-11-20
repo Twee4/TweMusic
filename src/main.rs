@@ -1,7 +1,7 @@
 use std::{path::PathBuf, sync::mpsc::{self, Receiver, Sender, TryRecvError}, thread, time::{Duration, Instant}};
 
 use eframe::egui::{
-    self, pos2, vec2, Align, CentralPanel, Context, Frame, Layout, Margin, Rect, Rounding, ScrollArea,
+    self, pos2, vec2, Align, CentralPanel, Context, Frame, Layout, Margin, Rect, Rounding, ScrollArea, scroll_area::ScrollBarVisibility,
     Sense, SidePanel, ThemePreference, TopBottomPanel, UiBuilder,
 };
 use souvlaki::{MediaControlEvent, MediaPosition};
@@ -975,7 +975,7 @@ impl TweMusicApp {
             m3::empty_state(ui, Icon::Search, "Search for music", "Type a song, artist or album and press Enter.");
             return;
         }
-        ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| {
+        ScrollArea::vertical().auto_shrink([false, false]).scroll_bar_visibility(ScrollBarVisibility::AlwaysHidden).show(ui, |ui| {
             for (index, track) in results.iter().enumerate() {
                 self.track_row(ui, track, index, results.len());
             }
@@ -1052,7 +1052,7 @@ impl TweMusicApp {
             );
             return;
         }
-        ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| {
+        ScrollArea::vertical().auto_shrink([false, false]).scroll_bar_visibility(ScrollBarVisibility::AlwaysHidden).show(ui, |ui| {
             for (index, track) in tracks.iter().enumerate() {
                 self.track_row(ui, track, index, tracks.len());
             }
@@ -1098,7 +1098,7 @@ impl TweMusicApp {
     fn render_settings(&mut self, ui: &mut egui::Ui, ctx: &Context) {
         let c = theme::colors(ui);
         Self::page_title(ui, "Settings", "Manage appearance and playback.");
-        ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| {
+        ScrollArea::vertical().auto_shrink([false, false]).scroll_bar_visibility(ScrollBarVisibility::AlwaysHidden).show(ui, |ui| {
             m3::card(ui, CardKind::Filled, |ui| {
                 ui.label(theme::text(Role::TitleMedium, "Appearance").color(c.on_surface));
                 ui.label(theme::text(Role::BodyMedium, "Choose a light or dark theme, or follow your system.").color(c.on_surface_variant));
