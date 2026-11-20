@@ -122,6 +122,12 @@ struct TweMusicApp {
 
 /// Width of the navigation rail on medium and expanded windows.
 const NAV_RAIL_WIDTH: f32 = 80.0;
+/// Space between the floating navigation rail and the page column.
+const RAIL_GAP: f32 = 24.0;
+/// Height of one rail destination, the space between them, and the rail's top and bottom padding.
+const RAIL_ITEM_HEIGHT: f32 = 64.0;
+const RAIL_ITEM_GAP: f32 = 4.0;
+const RAIL_PADDING: f32 = 12.0;
 
 impl TweMusicApp {
     fn new(ctx: Context) -> Self {
@@ -1173,11 +1179,11 @@ impl TweMusicApp {
         });
     }
 
-    fn render_top_bar(&mut self, ctx: &Context, c: &ColorScheme, margin: f32) {
+    fn render_top_bar(&mut self, ctx: &Context, c: &ColorScheme, left: f32, right: f32) {
         TopBottomPanel::top("top-app-bar")
             .exact_height(64.0)
             .show_separator_line(false)
-            .frame(Frame::none().inner_margin(Margin::symmetric(margin, 0.0)))
+            .frame(Frame::none().inner_margin(Margin { left, right, top: 0.0, bottom: 0.0 }))
             .show(ctx, |ui| {
                 ui.with_layout(Layout::left_to_right(Align::Center), |ui| {
                     let (rect, _) = ui.allocate_exact_size(vec2(32.0, 32.0), Sense::hover());
@@ -1209,19 +1215,28 @@ impl TweMusicApp {
         ]
     }
 
-    /// Navigation rail for medium and expanded windows.
-    fn render_nav_rail(&mut self, ctx: &Context, c: &ColorScheme) {
+    /// Navigation rail for medium and expanded windows: a glass pill floating at the left edge,
+    /// centred vertically, with the page column to its right.
+    fn render_nav_rail(&mut self, ctx: &Context, outer: f32) {
+        let dark = ctx.style().visuals.dark_mode;
+        let count = Self::destinations().len() as f32;
+        let height = count * RAIL_ITEM_HEIGHT + (count - 1.0) * RAIL_ITEM_GAP + RAIL_PADDING * 2.0;
         SidePanel::left("navigation-rail")
-            .exact_width(NAV_RAIL_WIDTH)
+            .exact_width(outer + NAV_RAIL_WIDTH + RAIL_GAP)
             .resizable(false)
             .show_separator_line(false)
-            .frame(Frame::none().inner_margin(Margin::symmetric(0.0, 12.0)))
+            .frame(Frame::none().inner_margin(Margin { left: outer, right: RAIL_GAP, top: 0.0, bottom: 0.0 }))
             .show(ctx, |ui| {
-                for (screen, icon, label) in Self::destinations() {
-                    if m3::rail_destination(ui, icon, label, self.state.screen == screen).clicked() {
-                        self.state.screen = screen;
+                ui.add_space(((ui.available_height() - height) / 2.0).max(0.0));
+                glass::glass_frame(dark, shape::EXTRA_LARGE).inner_margin(Margin::symmetric(0.0, RAIL_PADDING)).show(ui, |ui| {
+                    ui.set_width(NAV_RAIL_WIDTH);
+                    ui.spacing_mut().item_spacing.y = RAIL_ITEM_GAP;
+                    for (screen, icon, label) in Self::destinations() {
+                        if m3::rail_destination(ui, icon, label, self.state.screen == screen).clicked() {
+                            self.state.screen = screen;
+                        }
                     }
-                }
+                });
             });
     }
 
@@ -1245,7 +1260,7 @@ impl TweMusicApp {
             });
     }
 
-    fn render_player(&mut self, ctx: &Context, c: &ColorScheme, margin: f32, right_margin: f32) {
+    fn render_player(&mut self, ctx: &Context, c: &ColorScheme, left: f32, right: f32) {
         let (title, subtitle) = match self.state.current_track() {
             Some(track) if self.mpv.is_some() => (track.title.clone(), track.artist.clone()),
             _ if self.mpv.is_some() => ("Nothing playing".to_owned(), "Pick a song to start".to_owned()),
@@ -1273,7 +1288,7 @@ impl TweMusicApp {
 
         TopBottomPanel::bottom("player-panel")
             .show_separator_line(false)
-            .frame(Frame::none().inner_margin(Margin { left: margin, right: right_margin, top: 8.0, bottom: 8.0 }))
+            .frame(Frame::none().inner_margin(Margin { left, right, top: 8.0, bottom: 8.0 }))
             .show(ctx, |ui| {
                 glass::glass_frame(dark, shape::EXTRA_LARGE_INCREASED)
                     .fill(theme::with_alpha(c.surface_container_high, 0.78))
@@ -1372,21 +1387,24 @@ impl eframe::App for TweMusicApp {
         glass::aurora(ctx, &c, ctx.style().visuals.dark_mode);
         let size = WindowSize::from_width(ctx.screen_rect().width());
         let margin = size.margin();
-        // The navigation rail takes room on the left, so the right side gets the same room: the
-        // page then has equal space on both sides of the window.
-        let right_margin = if size == WindowSize::Compact { margin } else { margin + NAV_RAIL_WIDTH };
+        // With the rail, the page column runs from the gap right of the rail to the window's right
+        // margin, which equals the rail's margin on the left, so the window is symmetrical. Top bar,
+        // content and player share the column's edges. Narrow windows use the margin on both sides.
+        let compact = size == WindowSize::Compact;
+        let (left, right) = if compact { (margin, margin) } else { (0.0, margin) };
 
-        self.render_top_bar(ctx, &c, margin);
-        if size == WindowSize::Compact {
-            self.render_nav_bar(ctx, &c);
-        } else {
-            self.render_nav_rail(ctx, &c);
+        if !compact {
+            self.render_nav_rail(ctx, margin);
         }
-        self.render_player(ctx, &c, margin, right_margin);
+        self.render_top_bar(ctx, &c, left, right);
+        if compact {
+            self.render_nav_bar(ctx, &c);
+        }
+        self.render_player(ctx, &c, left, right);
 
         let content_rect = ctx.available_rect();
         CentralPanel::default()
-            .frame(Frame::none().inner_margin(Margin { left: margin, right: right_margin, top: 0.0, bottom: 0.0 }))
+            .frame(Frame::none().inner_margin(Margin { left, right, top: 0.0, bottom: 0.0 }))
             .show(ctx, |ui| match self.state.screen {
                 Screen::Home => self.render_home(ui),
                 Screen::Search => self.render_search(ui, ctx),
