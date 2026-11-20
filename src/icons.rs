@@ -1,10 +1,56 @@
 //! Small vector icons drawn with egui's painter, so they don't depend on which glyphs
 //! the default font contains. Shapes are laid out on Material's 24x24 icon grid and
-//! scaled to the requested size.
+//! scaled to the requested size, in the style of Material Symbols Rounded: round line caps
+//! and joins, rounded corners on solid shapes, and a heavier filled variant.
 
 use std::f32::consts::PI;
 
 use eframe::egui::{vec2, Color32, Mesh, Painter, Pos2, Rect, Rounding, Shape, Stroke};
+
+/// A polyline with round caps and round joins (egui's own lines have square ends). Long, smooth
+/// paths only get round ends, since their joints are already smooth.
+fn path(painter: &Painter, points: Vec<Pos2>, width: f32, color: Color32) {
+    let all = points.len() <= 8;
+    let last = points.len().saturating_sub(1);
+    for (index, point) in points.iter().enumerate() {
+        if all || index == 0 || index == last {
+            painter.circle_filled(*point, width / 2.0, color);
+        }
+    }
+    if points.len() >= 2 {
+        painter.add(Shape::line(points, Stroke::new(width, color)));
+    }
+}
+
+/// A straight line with round caps.
+fn stroke_line(painter: &Painter, from: Pos2, to: Pos2, width: f32, color: Color32) {
+    path(painter, vec![from, to], width, color);
+}
+
+/// The outline of a polygon with every corner rounded by `radius` (a small curve per corner).
+fn rounded(points: &[Pos2], radius: f32) -> Vec<Pos2> {
+    let count = points.len();
+    let mut out = Vec::with_capacity(count * 7);
+    for index in 0..count {
+        let corner = points[index];
+        let to_previous = points[(index + count - 1) % count] - corner;
+        let to_next = points[(index + 1) % count] - corner;
+        let cut = radius.min(to_previous.length() / 2.0).min(to_next.length() / 2.0);
+        let start = corner + to_previous.normalized() * cut;
+        let end = corner + to_next.normalized() * cut;
+        for step in 0..=6 {
+            let t = step as f32 / 6.0;
+            let point = start.to_vec2() * ((1.0 - t) * (1.0 - t)) + corner.to_vec2() * (2.0 * t * (1.0 - t)) + end.to_vec2() * (t * t);
+            out.push(point.to_pos2());
+        }
+    }
+    out
+}
+
+/// A filled convex shape with rounded corners.
+fn solid(painter: &Painter, points: &[Pos2], radius: f32, color: Color32) {
+    painter.add(Shape::convex_polygon(rounded(points, radius), color, Stroke::NONE));
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Icon {
@@ -44,7 +90,7 @@ impl Icon {
 
         match self {
             Self::Home => {
-                let outline = vec![at(12.0, 3.0), at(21.0, 11.0), at(19.0, 21.0), at(5.0, 21.0), at(3.0, 11.0)];
+                let outline = rounded(&[at(12.0, 3.2), at(20.8, 11.2), at(19.0, 20.5), at(5.0, 20.5), at(3.2, 11.2)], 2.6 * unit);
                 if filled {
                     painter.add(Shape::convex_polygon(outline.clone(), color, Stroke::NONE));
                 }
@@ -52,12 +98,12 @@ impl Icon {
             }
             Self::Search => {
                 painter.circle_stroke(at(10.0, 10.0), 6.0 * unit, stroke);
-                painter.line_segment([at(14.5, 14.5), at(20.5, 20.5)], stroke);
+                stroke_line(painter, at(14.8, 14.8), at(20.4, 20.4), stroke_width, color);
             }
             Self::Library | Self::Note => {
                 painter.circle_filled(at(8.0, 18.0), 3.6 * unit, color);
-                painter.line_segment([at(11.4, 18.0), at(11.4, 4.5)], Stroke::new(2.4 * unit, color));
-                painter.line_segment([at(11.4, 4.5), at(19.0, 8.0)], Stroke::new(2.8 * unit, color));
+                stroke_line(painter, at(11.4, 18.0), at(11.4, 4.5), 2.6 * unit, color);
+                stroke_line(painter, at(11.4, 4.5), at(19.0, 8.0), 3.0 * unit, color);
             }
             Self::Settings => {
                 painter.circle_stroke(at(12.0, 12.0), 6.5 * unit, stroke);
@@ -65,27 +111,30 @@ impl Icon {
                 for tooth in 0..8 {
                     let angle = tooth as f32 * PI / 4.0;
                     let (sin, cos) = angle.sin_cos();
-                    painter.line_segment(
-                        [at(12.0 + 6.5 * cos, 12.0 + 6.5 * sin), at(12.0 + 9.5 * cos, 12.0 + 9.5 * sin)],
-                        Stroke::new(2.8 * unit, color),
+                    stroke_line(
+                        painter,
+                        at(12.0 + 6.5 * cos, 12.0 + 6.5 * sin),
+                        at(12.0 + 9.3 * cos, 12.0 + 9.3 * sin),
+                        3.2 * unit,
+                        color,
                     );
                 }
             }
             Self::Play => {
-                painter.add(Shape::convex_polygon(vec![at(7.0, 4.5), at(7.0, 19.5), at(20.0, 12.0)], color, Stroke::NONE));
+                solid(painter, &[at(6.5, 4.5), at(6.5, 19.5), at(20.0, 12.0)], 2.4 * unit, color);
             }
             Self::Pause => {
-                let rounding = Rounding::same(1.0 * unit);
-                painter.rect_filled(Rect::from_two_pos(at(6.0, 5.0), at(10.0, 19.0)), rounding, color);
-                painter.rect_filled(Rect::from_two_pos(at(14.0, 5.0), at(18.0, 19.0)), rounding, color);
+                let rounding = Rounding::same(2.0 * unit);
+                painter.rect_filled(Rect::from_two_pos(at(5.5, 4.5), at(10.5, 19.5)), rounding, color);
+                painter.rect_filled(Rect::from_two_pos(at(13.5, 4.5), at(18.5, 19.5)), rounding, color);
             }
             Self::Next => {
-                painter.add(Shape::convex_polygon(vec![at(5.5, 5.5), at(5.5, 18.5), at(16.0, 12.0)], color, Stroke::NONE));
-                painter.rect_filled(Rect::from_two_pos(at(17.0, 5.5), at(19.5, 18.5)), Rounding::same(1.0 * unit), color);
+                solid(painter, &[at(5.0, 5.5), at(5.0, 18.5), at(16.0, 12.0)], 2.0 * unit, color);
+                painter.rect_filled(Rect::from_two_pos(at(16.8, 5.5), at(19.8, 18.5)), Rounding::same(1.5 * unit), color);
             }
             Self::Previous => {
-                painter.add(Shape::convex_polygon(vec![at(18.5, 5.5), at(18.5, 18.5), at(8.0, 12.0)], color, Stroke::NONE));
-                painter.rect_filled(Rect::from_two_pos(at(4.5, 5.5), at(7.0, 18.5)), Rounding::same(1.0 * unit), color);
+                solid(painter, &[at(19.0, 5.5), at(19.0, 18.5), at(8.0, 12.0)], 2.0 * unit, color);
+                painter.rect_filled(Rect::from_two_pos(at(4.2, 5.5), at(7.2, 18.5)), Rounding::same(1.5 * unit), color);
             }
             Self::Heart => {
                 // The classic heart curve, mapped onto the 24x24 grid.
@@ -110,16 +159,16 @@ impl Icon {
                     }
                     painter.add(Shape::mesh(mesh));
                 }
-                painter.add(Shape::closed_line(outline, Stroke::new(1.8 * unit, color)));
+                painter.add(Shape::closed_line(outline, Stroke::new(2.0 * unit, color)));
             }
             Self::More => {
                 for y in [5.0, 12.0, 19.0] {
-                    painter.circle_filled(at(12.0, y), 2.0 * unit, color);
+                    painter.circle_filled(at(12.0, y), 2.1 * unit, color);
                 }
             }
             Self::Close => {
-                painter.line_segment([at(6.0, 6.0), at(18.0, 18.0)], stroke);
-                painter.line_segment([at(18.0, 6.0), at(6.0, 18.0)], stroke);
+                stroke_line(painter, at(6.2, 6.2), at(17.8, 17.8), stroke_width, color);
+                stroke_line(painter, at(17.8, 6.2), at(6.2, 17.8), stroke_width, color);
             }
             Self::Power => {
                 // An arc open at the top, with a vertical bar through the gap.
@@ -129,8 +178,8 @@ impl Icon {
                         at(12.0 + 8.0 * angle.cos(), 13.0 + 8.0 * angle.sin())
                     })
                     .collect();
-                painter.add(Shape::line(arc, stroke));
-                painter.line_segment([at(12.0, 3.0), at(12.0, 11.5)], stroke);
+                path(painter, arc, stroke_width, color);
+                stroke_line(painter, at(12.0, 3.2), at(12.0, 11.5), stroke_width, color);
             }
             Self::History => {
                 // A clock face with a gap at the upper left, and hands.
@@ -140,14 +189,16 @@ impl Icon {
                         at(12.0 + 8.5 * angle.cos(), 12.0 + 8.5 * angle.sin())
                     })
                     .collect();
-                painter.add(Shape::line(arc, stroke));
-                painter.add(Shape::line(vec![at(12.0, 7.0), at(12.0, 12.0), at(15.5, 14.0)], stroke));
+                path(painter, arc, stroke_width, color);
+                path(painter, vec![at(12.0, 7.0), at(12.0, 12.0), at(15.5, 14.0)], stroke_width, color);
             }
             Self::Activity => {
-                painter.add(Shape::line(
-                    vec![at(3.0, 12.0), at(7.0, 12.0), at(10.0, 4.5), at(14.0, 19.5), at(17.0, 12.0), at(21.0, 12.0)],
-                    stroke,
-                ));
+                path(
+                    painter,
+                    vec![at(3.2, 12.0), at(7.0, 12.0), at(10.0, 4.8), at(14.0, 19.2), at(17.0, 12.0), at(20.8, 12.0)],
+                    stroke_width,
+                    color,
+                );
             }
             Self::User => {
                 painter.circle_stroke(at(12.0, 8.0), 4.0 * unit, stroke);
@@ -157,20 +208,21 @@ impl Icon {
                         at(12.0 + 8.0 * angle.cos(), 21.0 + 8.0 * angle.sin())
                     })
                     .collect();
-                painter.add(Shape::line(shoulders, stroke));
+                path(painter, shoulders, stroke_width, color);
             }
             Self::Shuffle => {
-                painter.add(Shape::line(vec![at(3.0, 7.0), at(7.0, 7.0), at(16.0, 17.0), at(20.5, 17.0)], stroke));
-                painter.add(Shape::line(vec![at(3.0, 17.0), at(7.0, 17.0), at(10.0, 13.6)], stroke));
-                painter.add(Shape::line(vec![at(14.0, 9.4), at(16.0, 7.0), at(20.5, 7.0)], stroke));
-                painter.add(Shape::line(vec![at(18.0, 4.5), at(20.5, 7.0), at(18.0, 9.5)], stroke));
-                painter.add(Shape::line(vec![at(18.0, 14.5), at(20.5, 17.0), at(18.0, 19.5)], stroke));
+                path(painter, vec![at(3.4, 7.0), at(7.0, 7.0), at(16.0, 17.0), at(20.0, 17.0)], stroke_width, color);
+                path(painter, vec![at(3.4, 17.0), at(7.0, 17.0), at(10.0, 13.6)], stroke_width, color);
+                path(painter, vec![at(14.0, 9.4), at(16.0, 7.0), at(20.0, 7.0)], stroke_width, color);
+                path(painter, vec![at(17.8, 4.4), at(20.4, 7.0), at(17.8, 9.6)], stroke_width, color);
+                path(painter, vec![at(17.8, 14.4), at(20.4, 17.0), at(17.8, 19.6)], stroke_width, color);
             }
             Self::Bolt => {
-                painter.add(Shape::closed_line(
-                    vec![at(13.0, 2.5), at(4.5, 14.0), at(11.0, 14.0), at(10.0, 21.5), at(19.5, 10.0), at(13.0, 10.0)],
-                    stroke,
-                ));
+                let outline = rounded(
+                    &[at(13.0, 2.8), at(4.8, 13.8), at(11.0, 13.8), at(10.0, 21.2), at(19.2, 10.2), at(13.0, 10.2)],
+                    1.3 * unit,
+                );
+                painter.add(Shape::closed_line(outline, stroke));
             }
             Self::Moon => {
                 // A crescent: the part of a circle that lies outside a second, offset circle.
@@ -209,7 +261,7 @@ impl Icon {
                         at(12.0 + 5.6 * angle.cos(), 11.5 + 5.6 * angle.sin())
                     })
                     .collect();
-                painter.add(Shape::line(mouth, stroke));
+                path(painter, mouth, stroke_width, color);
             }
             Self::Dumbbell => {
                 for (from, to) in [
@@ -219,7 +271,7 @@ impl Icon {
                     ((20.5, 9.0), (20.5, 15.0)),
                     ((6.5, 12.0), (17.5, 12.0)),
                 ] {
-                    painter.line_segment([at(from.0, from.1), at(to.0, to.1)], stroke);
+                    stroke_line(painter, at(from.0, from.1), at(to.0, to.1), stroke_width, color);
                 }
             }
             Self::Contrast => {
@@ -241,8 +293,5 @@ impl Icon {
 pub fn paint_check(painter: &Painter, center: Pos2, size: f32, color: Color32) {
     let unit = size / 18.0;
     let at = |x: f32, y: f32| center + vec2(x - 9.0, y - 9.0) * unit;
-    painter.add(Shape::line(
-        vec![at(3.5, 9.5), at(7.5, 13.5), at(14.5, 5.5)],
-        Stroke::new(2.0 * unit, color),
-    ));
+    path(painter, vec![at(3.5, 9.5), at(7.5, 13.5), at(14.5, 5.5)], 2.2 * unit, color);
 }
