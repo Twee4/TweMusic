@@ -292,11 +292,26 @@ impl Engine {
             self.stream_issued = Some(issued);
             return;
         }
-        let browser = self.ytdlp_browser();
-        let (tx, rx) = mpsc::channel();
-        thread::spawn(move || {
-            let _ = tx.send(ytdlp::resolve(&video_id, Some(browser.as_str())));
-        });
+        // A look-up for this very song may already be running (ahead or for the queue): join it
+        // instead of starting another.
+        let running = if self.ahead_rx.as_ref().is_some_and(|(id, _)| *id == track.id) {
+            self.ahead_rx.take().map(|(_, rx)| rx)
+        } else if self.prefetch_rx.as_ref().is_some_and(|(id, _)| *id == track.id) {
+            self.prefetch_rx.take().map(|(_, rx)| rx)
+        } else {
+            None
+        };
+        let rx = match running {
+            Some(rx) => rx,
+            None => {
+                let browser = self.ytdlp_browser();
+                let (tx, rx) = mpsc::channel();
+                thread::spawn(move || {
+                    let _ = tx.send(ytdlp::resolve(&video_id, Some(browser.as_str())));
+                });
+                rx
+            }
+        };
         // Replacing the receiver drops any older request; its result is simply ignored.
         self.stream_rx = Some(rx);
         self.pending_track = Some(track.clone());
@@ -802,6 +817,10 @@ impl Engine {
             return;
         }
         let Some(track) = self.state.tracks.iter().find(|track| track.id == next_id).cloned() else { return };
+        // Already being looked up ahead of time: wait for that one instead of asking twice.
+        if self.ahead_rx.as_ref().is_some_and(|(id, _)| *id == next_id) {
+            return;
+        }
         self.prefetch_tried = Some(next_id);
         if let Some((stream, issued)) = self.cached_stream(next_id) {
             if let Some(player) = self.mpv.as_mut() {
