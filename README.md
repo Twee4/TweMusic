@@ -23,7 +23,7 @@ Cargo workspace
 │                                          ids.rs: video IDs, thumbnail host allow-list
 ├── crates/player      (MPV JSON IPC wrapper)
 ├── src/               the engine: library, search, today's pick, playback, tray, notifications, MPRIS, colours
-├── crates/slint_app   the window (Slint): Home, Library, Settings, Search, player
+└── crates/slint_app   the window (Slint): Home, Library, Settings, Search, player
 ```
 
 If a client profile stops working, edit `~/.config/twe_music/clients.json` (same format as
