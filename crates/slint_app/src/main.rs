@@ -104,6 +104,29 @@ fn songs_of(tracks: &[Track], art: &mut Art) -> ModelRc<Song> {
     ModelRc::new(VecModel::from(tracks.iter().map(|track| song_of(track, art)).collect::<Vec<_>>()))
 }
 
+fn entries_of(tracks: &[Track], art: &mut Art, liked: impl Fn(&Track) -> bool) -> ModelRc<Entry> {
+    let rows: Vec<Entry> = tracks
+        .iter()
+        .map(|track| {
+            let song = song_of(track, art);
+            Entry {
+                title: song.title,
+                artist: song.artist,
+                tint: song.tint,
+                art: song.art,
+                liked: liked(track),
+                duration: track.duration_label().into(),
+            }
+        })
+        .collect();
+    ModelRc::new(VecModel::from(rows))
+}
+
+/// A cheap fingerprint of a song list, to notice when it changed.
+fn fingerprint(tracks: &[Track]) -> u64 {
+    tracks.iter().fold(tracks.len() as u64, |acc, track| acc.wrapping_mul(31).wrapping_add(track.id.0))
+}
+
 fn clock(seconds: Option<f64>) -> SharedString {
     let total = seconds.unwrap_or(0.0).max(0.0) as u64;
     format!("{}:{:02}", total / 60, total % 60).into()
@@ -117,6 +140,11 @@ struct ListKey {
     liked_len: usize,
     pick: Option<(u32, u64)>,
     art_version: u64,
+    results: u64,
+    liked_marks: usize,
+    playlist: u64,
+    selected_playlist: usize,
+    playlist_names: u64,
 }
 
 /// Copies the engine's state into the window. Cheap values are set every time; the song lists
@@ -130,6 +158,13 @@ fn sync(window: &AppWindow, engine: &Engine, art: &mut Art, key: &mut ListKey) {
         liked_len: engine.library.playlists.first().map_or(0, |playlist| playlist.tracks.len()),
         pick: engine.pick.as_ref().map(|pick| (pick.day, pick.track.id.0)),
         art_version: art.version(),
+        results: fingerprint(&engine.state.remote_results),
+        liked_marks: engine.state.remote_results.iter().filter(|track| engine.is_liked(track)).count(),
+        playlist: fingerprint(&engine.playlist_tracks()),
+        selected_playlist: engine.selected_playlist,
+        playlist_names: engine.library.playlists.iter().fold(0u64, |acc, playlist| {
+            acc.wrapping_mul(31).wrapping_add(playlist.name.len() as u64).wrapping_add(playlist.tracks.len() as u64 * 7)
+        }),
     };
     if *key != next {
         *key = next;
@@ -137,6 +172,18 @@ fn sync(window: &AppWindow, engine: &Engine, art: &mut Art, key: &mut ListKey) {
         window.set_recent(songs_of(&history, art));
         window.set_quick(songs_of(&history[..history.len().min(8)], art));
         window.set_liked(songs_of(&engine.liked_tracks(), art));
+        window.set_results(entries_of(&engine.state.remote_results, art, |track| engine.is_liked(track)));
+        window.set_playlists(ModelRc::new(VecModel::from(
+            engine
+                .library
+                .playlists
+                .iter()
+                .map(|playlist| SharedString::from(format!("{} ({})", playlist.name, playlist.tracks.len())))
+                .collect::<Vec<_>>(),
+        )));
+        window.set_selected_playlist(engine.selected_playlist as i32);
+        window.set_playlist_title(engine.library.playlists.get(engine.selected_playlist).map_or("", |playlist| playlist.name.as_str()).into());
+        window.set_library_rows(entries_of(&engine.playlist_tracks(), art, |_| false));
         match &engine.pick {
             Some(pick) => {
                 window.set_pick(song_of(&pick.track, art));
@@ -147,6 +194,8 @@ fn sync(window: &AppWindow, engine: &Engine, art: &mut Art, key: &mut ListKey) {
             None => window.set_has_pick(false),
         }
     }
+
+    window.set_search_status(if engine.searching { "Searching…" } else { engine.state.search_message.as_deref().unwrap_or("") }.into());
 
     let current = engine.current_track();
     window.set_has_track(current.is_some());
@@ -233,6 +282,86 @@ fn main() -> Result<(), slint::PlatformError> {
     {
         let engine = Rc::clone(&engine);
         window.on_toggle_like(move || engine.borrow_mut().toggle_like_current());
+    }
+
+    {
+        let engine = Rc::clone(&engine);
+        window.on_search(move |query| engine.borrow_mut().start_search(&query));
+    }
+    {
+        let engine = Rc::clone(&engine);
+        window.on_play_result(move |index| engine.borrow_mut().play_result(index.max(0) as usize));
+    }
+    {
+        let engine = Rc::clone(&engine);
+        window.on_like_result(move |index| {
+            let mut engine = engine.borrow_mut();
+            if let Some(track) = engine.state.remote_results.get(index.max(0) as usize).cloned() {
+                engine.toggle_like(&track);
+            }
+        });
+    }
+    {
+        let engine = Rc::clone(&engine);
+        window.on_select_playlist(move |index| engine.borrow_mut().select_playlist(index.max(0) as usize));
+    }
+    {
+        let engine = Rc::clone(&engine);
+        let weak = window.as_weak();
+        window.on_create_playlist(move |name| {
+            if engine.borrow_mut().create_playlist(&name) {
+                if let Some(window) = weak.upgrade() {
+                    window.set_new_playlist(SharedString::new());
+                }
+            }
+        });
+    }
+    {
+        let engine = Rc::clone(&engine);
+        let weak = window.as_weak();
+        window.on_import_playlist(move |url| {
+            engine.borrow_mut().start_import(&url);
+            if let Some(window) = weak.upgrade() {
+                window.set_import_url(SharedString::new());
+            }
+        });
+    }
+    {
+        let engine = Rc::clone(&engine);
+        window.on_play_playlist(move || engine.borrow_mut().play_selected_playlist());
+    }
+    {
+        let engine = Rc::clone(&engine);
+        window.on_delete_playlist(move || engine.borrow_mut().delete_selected_playlist());
+    }
+    {
+        let engine = Rc::clone(&engine);
+        window.on_remove_track(move |index| engine.borrow_mut().remove_from_selected(index.max(0) as usize));
+    }
+    {
+        let engine = Rc::clone(&engine);
+        window.on_play_library(move |index| {
+            let mut engine = engine.borrow_mut();
+            let tracks = engine.playlist_tracks();
+            engine.play_from(tracks, index.max(0) as usize);
+        });
+    }
+    {
+        let engine = Rc::clone(&engine);
+        window.on_settings_changed(move |name, value| {
+            engine.borrow_mut().update_settings(|settings| match name.as_str() {
+                "notifications" => settings.notifications = value,
+                "tray" => settings.tray = value,
+                "dynamic-color" => settings.dynamic_color = value,
+                _ => {}
+            });
+        });
+    }
+    {
+        let settings = engine.borrow().settings.clone();
+        window.set_set_notifications(settings.notifications);
+        window.set_set_tray(settings.tray);
+        window.set_set_dynamic_color(settings.dynamic_color);
     }
 
     // Every 250 ms: collect finished background work, follow mpv, and refresh the window.
