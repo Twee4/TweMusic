@@ -37,6 +37,16 @@ cargo test
 cargo run
 ```
 
+## Install (Arch Linux)
+
+```bash
+cd packaging/arch
+makepkg -si
+```
+
+This builds the app, installs `twemusic` into `/usr/bin` and adds a launcher and icon, so you can
+start it from the application menu. It pulls in `mpv` and `yt-dlp`.
+
 TweMusic needs MPV:
 
 ```bash

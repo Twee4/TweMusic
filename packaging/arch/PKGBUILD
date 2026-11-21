@@ -1,0 +1,29 @@
+# Maintainer: Twee4
+# Build and install from a checkout of the repository:
+#   cd packaging/arch && makepkg -si
+pkgname=twemusic
+pkgver=0.1.0
+pkgrel=1
+pkgdesc='Native Linux music player with a glass Material 3 interface (Slint)'
+arch=('x86_64' 'aarch64')
+url='https://github.com/Twee4/TweMusic'
+license=('MIT')
+depends=('mpv' 'yt-dlp' 'fontconfig' 'libxkbcommon' 'libglvnd' 'dbus')
+makedepends=('cargo' 'pkgconf')
+optdepends=('deno: lets yt-dlp solve YouTube challenges when the direct lookup is blocked'
+            'nodejs: alternative to deno for yt-dlp')
+options=('!lto')
+
+_repo="$startdir/../.."
+
+build() {
+  cd "$_repo"
+  export CARGO_TARGET_DIR="$srcdir/target"
+  cargo build --release -p twe_slint
+}
+
+package() {
+  install -Dm755 "$srcdir/target/release/twe_slint" "$pkgdir/usr/bin/twemusic"
+  install -Dm644 "$_repo/packaging/twemusic.desktop" "$pkgdir/usr/share/applications/twemusic.desktop"
+  install -Dm644 "$_repo/packaging/twemusic.svg" "$pkgdir/usr/share/icons/hicolor/scalable/apps/twemusic.svg"
+}
