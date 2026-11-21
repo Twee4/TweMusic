@@ -687,6 +687,7 @@ export component AppWindow inherits Window {
             content-width: root.column-width;
             VerticalLayout {
                 width: root.column-width;
+                alignment: start;
                 spacing: 20px;
                 padding-bottom: 16px;
                 Text {
@@ -751,6 +752,7 @@ export component AppWindow inherits Window {
                 content-width: root.column-width;
                 VerticalLayout {
                     width: root.column-width;
+                alignment: start;
                     spacing: 2px;
                     padding-bottom: 12px;
                     for entry[i] in root.results : TrackRow {
@@ -774,6 +776,7 @@ export component AppWindow inherits Window {
             content-width: root.column-width;
             VerticalLayout {
                 width: root.column-width;
+                alignment: start;
                 spacing: 14px;
                 padding-bottom: 16px;
                 Text {
@@ -883,6 +886,7 @@ export component AppWindow inherits Window {
             content-width: root.column-width;
             VerticalLayout {
                 width: root.column-width;
+                alignment: start;
                 spacing: 12px;
                 padding-bottom: 16px;
                 Text {
@@ -892,7 +896,7 @@ export component AppWindow inherits Window {
                     color: Palette.on-surface;
                 }
                 Text {
-                    text: "Saved next to your library. The tray and notifications start working in this window with the next update.";
+                    text: "Saved next to your library.";
                     wrap: word-wrap;
                     font-size: 14px;
                     color: Palette.on-surface-variant;
