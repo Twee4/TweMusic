@@ -1,4 +1,5 @@
 pub mod desktop;
+pub mod engine;
 pub mod dynamic_color;
 pub mod glass;
 pub mod icons;
