@@ -9,9 +9,9 @@
 //! The approach (seed colour, tonal palettes, spring-animated change) follows the idea in
 //! ShinChven/m3-expressive's `@m3-expressive/core`; no code is copied.
 
-use eframe::egui::Color32;
 
-use crate::theme::{self, ColorScheme, DARK, LIGHT, motion};
+
+use crate::theme::{self, Color32, ColorScheme, DARK, LIGHT, motion};
 
 /// A (light, dark) pair of schemes.
 pub type Pair = (ColorScheme, ColorScheme);

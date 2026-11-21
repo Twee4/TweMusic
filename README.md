@@ -8,7 +8,7 @@ TweMusic is a native Linux music player written in Rust, with a Material 3 Expre
 - **Search and play:** find songs online and play the audio-only stream through MPV (no video, no ads), with a queue, previous/next and auto-advance. Playback is gapless, and streams are refreshed before they expire.
 - **Library:** Liked songs and your own playlists, saved in `~/.local/share/twe_music/library.json`, plus import of public playlists by link. Recently played songs and daily listening time are kept there too.
 - **Dynamic colour:** the whole app takes its colours from the album art of the playing song. Turn it off in Settings.
-- **Material 3 design:** light and dark colour roles (follows your system, or pick one in Settings), Material type and shape scales, state layers, chips, list items, and an adaptive layout (navigation bar on narrow windows, navigation rail on wide ones). A glass look sits on a soft colour backdrop. Messages appear as snackbars.
+- **Look:** a glass, Material 3 style interface drawn with Slint, with a floating navigation rail, colours taken from the album art, and messages shown as a notice bar.
 - **Linux integration:** media keys and desktop media widgets (MPRIS), a tray icon and track notifications.
 - **Fallback helper (optional):** if a direct lookup is refused, TweMusic can hand it to `yt-dlp` (install it together with `deno` or `node`). It runs without an account and TweMusic never stores or sends your cookies. Advanced: set `ytdlp_browser` in `settings.json` to `firefox`, `chrome`, `chromium`, `brave` or `vivaldi` to use that browser's session instead.
 
@@ -22,7 +22,8 @@ Cargo workspace
 │                                          transport.rs: HTTP + headers   player.rs: stream lookup
 │                                          ids.rs: video IDs, thumbnail host allow-list
 ├── crates/player      (MPV JSON IPC wrapper)
-├── src/               the native egui app: Home, glass/Material 3 UI, library, tray, notifications, MPRIS
+├── src/               the engine: library, search, today's pick, playback, tray, notifications, MPRIS, colours
+├── crates/slint_app   the window (Slint): Home, Library, Settings, Search, player
 └── src-tauri/         optional webview experiment (needs WebKitGTK; not built by default)
 ```
 
