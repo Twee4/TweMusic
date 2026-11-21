@@ -320,6 +320,7 @@ impl Engine {
 
     fn start_stream(&mut self, track: &Track, stream: &Stream) {
         let result = self.ensure_player().and_then(|player| player.load_stream(stream));
+        eprintln!("[timing] handed {} to mpv: {}", track.title, if result.is_ok() { "ok" } else { "failed" });
         match result {
             Ok(()) => {
                 if !self.state.tracks.iter().any(|existing| existing.id == track.id) {
@@ -369,6 +370,7 @@ impl Engine {
         // The next track is usually looked up and queued in mpv already: switch to it at once.
         if forward && self.state.playback == PlaybackStatus::Playing && self.queued_next.is_some_and(|(queued, _)| queued == id) {
             let jumped = self.mpv.as_mut().is_some_and(|player| player.advance_to_queued().is_ok());
+            eprintln!("[timing] Next: jumped to the queued song: {jumped}");
             if jumped {
                 self.finish_advance(id);
                 return;
