@@ -1,0 +1,411 @@
+// TweMusic Home in Slint: aurora backdrop, floating glass rail, top bar, today's pick card,
+// quick access grid and a shelf. Icon paths are Material Icons (Apache 2.0) on a 24x24 grid.
+
+struct Song {
+    title: string,
+    artist: string,
+    tint: color,
+}
+
+component Icon inherits Path {
+    in property <string> glyph;
+    in property <length> size: 24px;
+    width: size;
+    height: size;
+    viewbox-width: 24;
+    viewbox-height: 24;
+    commands: glyph;
+    fill: #e8e0f0;
+}
+
+component RailItem inherits Rectangle {
+    in property <string> glyph;
+    in property <string> label;
+    in property <bool> selected;
+    callback clicked();
+    width: 80px;
+    height: 64px;
+    VerticalLayout {
+        alignment: center;
+        spacing: 4px;
+        HorizontalLayout {
+            alignment: center;
+            Rectangle {
+                width: 56px;
+                height: 32px;
+                border-radius: 16px;
+                background: root.selected ? #4a3a7a : (ta.has-hover ? #ffffff14 : #00000000);
+                animate background { duration: 150ms; easing: ease-out; }
+                Icon {
+                    glyph: root.glyph;
+                    size: 22px;
+                    fill: root.selected ? #ffffff : #cfc6dc;
+                }
+            }
+        }
+        Text {
+            text: root.label;
+            horizontal-alignment: center;
+            font-size: 12px;
+            font-weight: root.selected ? 700 : 500;
+            color: root.selected ? #ffffff : #cfc6dc;
+        }
+    }
+    ta := TouchArea {
+        clicked => { root.clicked(); }
+    }
+}
+
+component Chip inherits Rectangle {
+    in property <string> label;
+    in property <bool> selected;
+    callback clicked();
+    height: 36px;
+    border-radius: 18px;
+    background: root.selected ? #6750a4 : (ta.has-hover ? #ffffff24 : #ffffff14);
+    animate background { duration: 150ms; easing: ease-out; }
+    HorizontalLayout {
+        padding-left: 16px;
+        padding-right: 16px;
+        alignment: center;
+        Text {
+            text: root.label;
+            vertical-alignment: center;
+            font-size: 14px;
+            font-weight: 600;
+            color: #f4eefc;
+        }
+    }
+    ta := TouchArea {
+        clicked => { root.clicked(); }
+    }
+}
+
+component Art inherits Rectangle {
+    in property <color> tint;
+    border-radius: 14px;
+    clip: true;
+    background: @linear-gradient(135deg, root.tint 0%, root.tint.darker(0.5) 100%);
+}
+
+component QuickCard inherits Rectangle {
+    in property <Song> song;
+    callback clicked();
+    height: 56px;
+    border-radius: 12px;
+    background: ta.has-hover ? #ffffff26 : #ffffff14;
+    animate background { duration: 120ms; }
+    HorizontalLayout {
+        spacing: 12px;
+        Art {
+            width: 56px;
+            tint: root.song.tint;
+            border-radius: 12px;
+        }
+        Text {
+            text: root.song.title;
+            vertical-alignment: center;
+            overflow: elide;
+            font-size: 14px;
+            font-weight: 700;
+            color: #f4eefc;
+        }
+    }
+    ta := TouchArea {
+        clicked => { root.clicked(); }
+    }
+}
+
+component ShelfCard inherits Rectangle {
+    in property <Song> song;
+    callback clicked();
+    width: 156px;
+    height: 220px;
+    VerticalLayout {
+        spacing: 6px;
+        Art {
+            height: 156px;
+            tint: root.song.tint;
+        }
+        Text {
+            text: root.song.title;
+            overflow: elide;
+            font-size: 14px;
+            font-weight: 600;
+            color: #f4eefc;
+        }
+        Text {
+            text: root.song.artist;
+            overflow: elide;
+            font-size: 12px;
+            color: #b9aecb;
+        }
+    }
+    TouchArea {
+        clicked => { root.clicked(); }
+    }
+}
+
+component PickCard inherits Rectangle {
+    in property <Song> song;
+    in property <string> why;
+    callback clicked();
+    height: 148px;
+    border-radius: 28px;
+    background: ta.has-hover ? #6750a4cc : #6750a499;
+    animate background { duration: 150ms; }
+    HorizontalLayout {
+        padding: 14px;
+        spacing: 16px;
+        Art {
+            width: 120px;
+            tint: root.song.tint;
+            border-radius: 18px;
+        }
+        VerticalLayout {
+            spacing: 4px;
+            Text {
+                text: "TODAY'S PICK";
+                font-size: 12px;
+                font-weight: 700;
+                color: #d0bcff;
+            }
+            Text {
+                text: root.song.title;
+                font-size: 20px;
+                font-weight: 700;
+                color: #ffffff;
+                overflow: elide;
+            }
+            Text {
+                text: root.song.artist;
+                font-size: 14px;
+                color: #e8def8;
+            }
+            Text {
+                text: root.why;
+                font-size: 12px;
+                color: #cfc6dc;
+            }
+        }
+        Rectangle {
+            width: 48px;
+            Rectangle {
+                y: parent.height - self.height;
+                width: 48px;
+                height: 48px;
+                border-radius: 24px;
+                background: #d0bcff;
+                Icon {
+                    glyph: "M8 5v14l11-7z";
+                    size: 24px;
+                    fill: #381e72;
+                }
+            }
+        }
+    }
+    ta := TouchArea {
+        clicked => { root.clicked(); }
+    }
+}
+
+export component HomeWindow inherits Window {
+    title: "TweMusic (Slint trial)";
+    preferred-width: 1100px;
+    preferred-height: 720px;
+    min-width: 640px;
+    min-height: 480px;
+    background: #15111d;
+
+    callback play(string);
+    callback navigate(int);
+
+    in-out property <int> screen: 0;
+    in-out property <int> mood: 0;
+    in property <[string]> moods: ["All", "Chill", "Focus", "Energize", "Workout"];
+    in property <Song> pick: { title: "Mayabee", artist: "Blue Touch", tint: #5a8f86 };
+    in property <[Song]> recent: [
+        { title: "Mayabee", artist: "Blue Touch", tint: #5a8f86 },
+        { title: "Amon Chena", artist: "Ashes", tint: #6b6b78 },
+        { title: "Encore", artist: "Srotoshinni", tint: #2a2a2a },
+        { title: "Onno Groher Chand", artist: "Sohan Ali", tint: #8a3b3b },
+        { title: "Charpoka", artist: "Ashes Bangladesh", tint: #7a7a86 },
+        { title: "Blue Touch", artist: "Blue Touch", tint: #3b6a8a },
+    ];
+
+    // Aurora: soft colour blobs behind everything.
+    Rectangle {
+        background: @radial-gradient(circle, #7b5ea755 0%, #00000000 100%);
+        x: -200px;
+        y: -240px;
+        width: 900px;
+        height: 900px;
+    }
+    Rectangle {
+        background: @radial-gradient(circle, #3b6a8a44 0%, #00000000 100%);
+        x: parent.width - 600px;
+        y: parent.height - 600px;
+        width: 800px;
+        height: 800px;
+    }
+
+    // Floating rail: a glass pill at the left, centred vertically.
+    Rectangle {
+        x: 32px;
+        y: (parent.height - self.height) / 2;
+        width: 80px;
+        height: 3 * 64px + 2 * 4px + 24px;
+        border-radius: 28px;
+        background: #ffffff12;
+        VerticalLayout {
+            padding-top: 12px;
+            padding-bottom: 12px;
+            spacing: 4px;
+            RailItem {
+                glyph: "M10 20v-6h4v6h5v-8h3L12 3 2 12h3v8z";
+                label: "Home";
+                selected: root.screen == 0;
+                clicked => { root.screen = 0; root.navigate(0); }
+            }
+            RailItem {
+                glyph: "M20 2H8c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h12c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2zm-2 5h-3v5.5c0 1.38-1.12 2.5-2.5 2.5S10 13.88 10 12.5s1.12-2.5 2.5-2.5c.57 0 1.08.19 1.5.51V5h4v2zM4 6H2v14c0 1.1.9 2 2 2h14v-2H4V6z";
+                label: "Library";
+                selected: root.screen == 1;
+                clicked => { root.screen = 1; root.navigate(1); }
+            }
+            RailItem {
+                glyph: "M19.14 12.94c.04-.3.06-.61.06-.94 0-.32-.02-.64-.07-.94l2.03-1.58a.49.49 0 00.12-.61l-1.92-3.32a.488.488 0 00-.59-.22l-2.39.96c-.5-.38-1.03-.7-1.62-.94l-.36-2.54a.484.484 0 00-.48-.41h-3.84c-.24 0-.43.17-.47.41l-.36 2.54c-.59.24-1.13.57-1.62.94l-2.39-.96c-.22-.08-.47 0-.59.22L2.74 8.87c-.12.21-.08.47.12.61l2.03 1.58c-.05.3-.09.63-.09.94s.02.64.07.94l-2.03 1.58a.49.49 0 00-.12.61l1.92 3.32c.12.22.37.29.59.22l2.39-.96c.5.38 1.03.7 1.62.94l.36 2.54c.05.24.24.41.48.41h3.84c.24 0 .44-.17.47-.41l.36-2.54c.59-.24 1.13-.56 1.62-.94l2.39.96c.22.08.47 0 .59-.22l1.92-3.32c.12-.22.07-.47-.12-.61l-2.01-1.58zM12 15.6c-1.98 0-3.6-1.62-3.6-3.6s1.62-3.6 3.6-3.6 3.6 1.62 3.6 3.6-1.62 3.6-3.6 3.6z";
+                label: "Settings";
+                selected: root.screen == 2;
+                clicked => { root.screen = 2; root.navigate(2); }
+            }
+        }
+    }
+
+    // Page column: top bar, content, player. The right margin equals the rail's left margin.
+    VerticalLayout {
+        x: 32px + 80px + 24px;
+        width: parent.width - self.x - 32px;
+        height: parent.height;
+
+        // Top bar
+        HorizontalLayout {
+            height: 64px;
+            spacing: 8px;
+            Text {
+                text: "TweMusic";
+                vertical-alignment: center;
+                font-size: 24px;
+                font-weight: 700;
+                color: #f4eefc;
+            }
+            Rectangle { horizontal-stretch: 1; }
+            Rectangle {
+                width: 40px;
+                height: 40px;
+                border-radius: 20px;
+                background: search-ta.has-hover ? #ffffff24 : #00000000;
+                Icon {
+                    glyph: "M15.5 14h-.79l-.28-.27A6.471 6.471 0 0016 9.5 6.5 6.5 0 109.5 16c1.61 0 3.09-.59 4.23-1.57l.27.28v.79l5 4.99L20.49 19l-4.99-5zm-6 0C7.01 14 5 11.99 5 9.5S7.01 5 9.5 5 14 7.01 14 9.5 11.99 14 9.5 14z";
+                }
+                search-ta := TouchArea {}
+            }
+        }
+
+        // Content
+        Flickable {
+            VerticalLayout {
+                spacing: 16px;
+                padding-bottom: 16px;
+                Text {
+                    text: "Good evening";
+                    font-size: 32px;
+                    font-weight: 700;
+                    color: #f4eefc;
+                }
+                HorizontalLayout {
+                    spacing: 8px;
+                    for name[i] in root.moods : Chip {
+                        label: name;
+                        selected: root.mood == i;
+                        clicked => { root.mood = i; }
+                    }
+                    Rectangle { horizontal-stretch: 1; }
+                }
+                PickCard {
+                    song: root.pick;
+                    why: "Because you listen to Blue Touch";
+                    clicked => { root.play(root.pick.title); }
+                }
+                GridLayout {
+                    spacing: 8px;
+                    for song[i] in root.recent : QuickCard {
+                        row: floor(i / 2);
+                        col: mod(i, 2);
+                        song: song;
+                        clicked => { root.play(song.title); }
+                    }
+                }
+                Text {
+                    text: "Recently played";
+                    font-size: 22px;
+                    font-weight: 700;
+                    color: #f4eefc;
+                }
+                Flickable {
+                    height: 220px;
+                    HorizontalLayout {
+                        spacing: 14px;
+                        for song in root.recent : ShelfCard {
+                            song: song;
+                            clicked => { root.play(song.title); }
+                        }
+                    }
+                }
+            }
+        }
+
+        // Player: one glass card, the same width as the column.
+        Rectangle {
+            height: 96px;
+            border-radius: 28px;
+            background: #ffffff14;
+            HorizontalLayout {
+                padding: 16px;
+                spacing: 14px;
+                Art {
+                    width: 64px;
+                    tint: #6750a4;
+                    border-radius: 16px;
+                }
+                VerticalLayout {
+                    alignment: center;
+                    Text {
+                        text: "Nothing playing";
+                        font-size: 16px;
+                        font-weight: 600;
+                        color: #f4eefc;
+                    }
+                    Text {
+                        text: "Pick a song to start";
+                        font-size: 13px;
+                        color: #b9aecb;
+                    }
+                }
+                Rectangle { horizontal-stretch: 1; }
+                Rectangle {
+                    width: 64px;
+                    height: 64px;
+                    border-radius: 32px;
+                    background: #6750a4;
+                    Icon {
+                        glyph: "M8 5v14l11-7z";
+                        size: 28px;
+                        fill: #ffffff;
+                    }
+                }
+            }
+        }
+        Rectangle { height: 24px; }
+    }
+}
