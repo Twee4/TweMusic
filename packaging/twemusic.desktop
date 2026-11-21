@@ -1,0 +1,10 @@
+[Desktop Entry]
+Type=Application
+Name=TweMusic
+GenericName=Music Player
+Comment=Play music without ads
+Exec=twemusic
+Icon=twemusic
+Terminal=false
+Categories=AudioVideo;Audio;Player;Music;
+Keywords=music;player;audio;
