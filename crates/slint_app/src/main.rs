@@ -148,6 +148,13 @@ fn apply_palette(window: &AppWindow, scheme: &ColorScheme) {
     palette.set_aurora_b(col!(scheme.tertiary_container));
     palette.set_on_surface(col!(scheme.on_surface));
     palette.set_on_surface_variant(col!(scheme.on_surface_variant));
+    let tint = |alpha: u8| {
+        let c = scheme.secondary_container;
+        Color::from_argb_u8(alpha, c.r(), c.g(), c.b())
+    };
+    palette.set_glass(tint(115));
+    palette.set_glass_hover(tint(180));
+    palette.set_glass_solid(col!(scheme.surface_container_high));
 }
 
 fn clock(seconds: Option<f64>) -> SharedString {
