@@ -15,6 +15,7 @@ use std::{
 use twe_innertube::Stream;
 
 use crate::{
+    import,
     library::{self, Library, SavedTrack},
     models::{Track, TrackId},
     mpv::{MpvError, MpvPlayer},
@@ -42,6 +43,10 @@ pub struct Engine {
     pub library: Library,
     pub settings: Settings,
     library_path: Option<PathBuf>,
+    settings_path: Option<PathBuf>,
+    /// The playlist shown in the Library.
+    pub selected_playlist: usize,
+    import_rx: Option<Receiver<Result<(String, Vec<Track>), String>>>,
     mpv: Option<MpvPlayer>,
 
     /// Transient status for the player ("Loading…", "Paused").
@@ -82,12 +87,16 @@ impl Engine {
     pub fn new() -> Self {
         let library_path = library::default_path();
         let library = library_path.as_deref().map(Library::load_from).unwrap_or_else(Library::new);
-        let settings = settings::default_path().as_deref().map(Settings::load_from).unwrap_or_default();
+        let settings_path = settings::default_path();
+        let settings = settings_path.as_deref().map(Settings::load_from).unwrap_or_default();
         let mut engine = Self {
             state: AppState::new(),
             library,
             settings,
             library_path,
+            settings_path,
+            selected_playlist: 0,
+            import_rx: None,
             mpv: None,
             message: None,
             position: None,
@@ -284,7 +293,128 @@ impl Engine {
         self.notify(if liked { "Added to Liked songs." } else { "Removed from Liked songs." });
     }
 
+    // ---- Library ------------------------------------------------------------------------
+
+    pub fn playlist_tracks(&self) -> Vec<Track> {
+        self.library
+            .playlists
+            .get(self.selected_playlist)
+            .map(|playlist| playlist.tracks.iter().map(SavedTrack::to_track).collect())
+            .unwrap_or_default()
+    }
+
+    pub fn select_playlist(&mut self, index: usize) {
+        if index < self.library.playlists.len() {
+            self.selected_playlist = index;
+        }
+    }
+
+    pub fn create_playlist(&mut self, name: &str) -> bool {
+        match self.library.create(name) {
+            Some(index) => {
+                self.selected_playlist = index;
+                self.save_library();
+                true
+            }
+            None => {
+                self.notify("Enter a playlist name that isn't already used.");
+                false
+            }
+        }
+    }
+
+    /// Deletes the shown playlist (never "Liked songs").
+    pub fn delete_selected_playlist(&mut self) {
+        if self.library.delete(self.selected_playlist) {
+            self.selected_playlist = 0;
+            self.save_library();
+        }
+    }
+
+    pub fn remove_from_selected(&mut self, index: usize) {
+        let Some(saved) = self.library.playlists.get(self.selected_playlist).and_then(|playlist| playlist.tracks.get(index)) else { return };
+        let video_id = saved.video_id.clone();
+        self.library.remove(self.selected_playlist, &video_id);
+        self.save_library();
+    }
+
+    /// Plays the shown playlist from its first song.
+    pub fn play_selected_playlist(&mut self) {
+        let tracks = self.playlist_tracks();
+        if tracks.is_empty() {
+            self.notify("That playlist is empty.");
+        } else {
+            self.play_from(tracks, 0);
+        }
+    }
+
+    pub fn is_liked(&self, track: &Track) -> bool {
+        self.library.is_liked(track)
+    }
+
+    /// Likes or unlikes any song (the heart on a search result).
+    pub fn toggle_like(&mut self, track: &Track) {
+        let liked = self.library.toggle_like(track);
+        self.save_library();
+        self.notify(if liked { "Added to Liked songs." } else { "Removed from Liked songs." });
+    }
+
+    pub fn start_import(&mut self, url: &str) {
+        if self.import_rx.is_some() {
+            return;
+        }
+        let url = url.trim().to_owned();
+        if !import::is_supported_playlist_url(&url) {
+            self.notify("Paste a public playlist link (it must contain list=).");
+            return;
+        }
+        let (tx, rx) = mpsc::channel();
+        self.import_rx = Some(rx);
+        self.notify("Importing playlist…");
+        thread::spawn(move || {
+            let _ = tx.send(import::import_playlist(&url));
+        });
+    }
+
+    fn poll_import(&mut self) {
+        let Some(rx) = &self.import_rx else { return };
+        let outcome = match rx.try_recv() {
+            Ok(result) => result,
+            Err(TryRecvError::Empty) => return,
+            Err(TryRecvError::Disconnected) => Err("Import stopped unexpectedly.".to_owned()),
+        };
+        self.import_rx = None;
+        match outcome {
+            Ok((name, tracks)) => {
+                let (index, added) = self.library.import(&name, &tracks);
+                self.selected_playlist = index;
+                self.save_library();
+                let saved_name = self.library.playlists[index].name.clone();
+                self.notify(format!("Imported {added} tracks into \"{saved_name}\"."));
+            }
+            Err(error) => self.notify(error),
+        }
+    }
+
+    // ---- Settings ---------------------------------------------------------------------
+
+    /// Changes a setting and saves the settings file.
+    pub fn update_settings(&mut self, change: impl FnOnce(&mut Settings)) {
+        change(&mut self.settings);
+        if let Some(path) = &self.settings_path {
+            if let Err(error) = self.settings.save_to(path) {
+                self.notices.push(format!("Could not save settings: {error}"));
+            }
+        }
+    }
+
     // ---- Search -----------------------------------------------------------------------
+
+    /// Plays the search results as the queue, starting at `index`.
+    pub fn play_result(&mut self, index: usize) {
+        let results = self.state.remote_results.clone();
+        self.play_from(results, index);
+    }
 
     pub fn start_search(&mut self, query: &str) {
         let query = query.trim().to_owned();
@@ -339,6 +469,7 @@ impl Engine {
         self.poll_related();
         self.poll_search();
         self.poll_pick();
+        self.poll_import();
     }
 
     fn poll_stream(&mut self) {

@@ -8,6 +8,22 @@ struct Song {
     art: image,
 }
 
+struct Entry {
+    title: string,
+    artist: string,
+    tint: color,
+    art: image,
+    liked: bool,
+    duration: string,
+}
+
+global Glyphs {
+    out property <string> heart: "M16.5 3c-1.74 0-3.41.81-4.5 2.09C10.91 3.81 9.24 3 7.5 3 4.42 3 2 5.42 2 8.5c0 3.78 3.4 6.86 8.55 11.54L12 21.35l1.45-1.32C18.6 15.36 22 12.28 22 8.5 22 5.42 19.58 3 16.5 3zm-4.4 15.55l-.1.1-.1-.1C7.14 14.24 4 11.39 4 8.5 4 6.5 5.5 5 7.5 5c1.54 0 3.04.99 3.57 2.36h1.87C13.46 5.99 14.96 5 16.5 5c2 0 3.5 1.5 3.5 3.5 0 2.89-3.14 5.74-7.9 10.05z";
+    out property <string> heart-filled: "M12 21.35l-1.45-1.32C5.4 15.36 2 12.28 2 8.5 2 5.42 4.42 3 7.5 3c1.74 0 3.41.81 4.5 2.09C13.09 3.81 14.76 3 16.5 3 19.58 3 22 5.42 22 8.5c0 3.78-3.4 6.86-8.55 11.54L12 21.35z";
+    out property <string> search: "M15.5 14h-.79l-.28-.27A6.471 6.471 0 0016 9.5 6.5 6.5 0 109.5 16c1.61 0 3.09-.59 4.23-1.57l.27.28v.79l5 4.99L20.49 19l-4.99-5zm-6 0C7.01 14 5 11.99 5 9.5S7.01 5 9.5 5 14 7.01 14 9.5 11.99 14 9.5 14z";
+    out property <string> close: "M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z";
+}
+
 component Icon inherits Path {
     in property <string> glyph;
     in property <length> size: 24px;
@@ -279,6 +295,208 @@ component SeekBar inherits Rectangle {
     }
 }
 
+component TextButton inherits Rectangle {
+    in property <string> text;
+    in property <bool> filled: true;
+    in property <bool> destructive: false;
+    in property <bool> enabled: true;
+    callback clicked();
+    height: 40px;
+    border-radius: 20px;
+    opacity: root.enabled ? 1.0 : 0.4;
+    background: root.destructive ? (ta.has-hover ? #8c3a4a : #7a2f3f)
+        : (root.filled ? (ta.has-hover ? #7a63b8 : #6750a4) : (ta.has-hover ? #ffffff26 : #ffffff14));
+    animate background { duration: 120ms; }
+    HorizontalLayout {
+        padding-left: 20px;
+        padding-right: 20px;
+        Text {
+            text: root.text;
+            vertical-alignment: center;
+            font-size: 14px;
+            font-weight: 600;
+            color: #ffffff;
+        }
+    }
+    ta := TouchArea {
+        enabled: root.enabled;
+        clicked => { root.clicked(); }
+    }
+}
+
+component Chip inherits Rectangle {
+    in property <string> label;
+    in property <bool> selected;
+    callback clicked();
+    height: 36px;
+    border-radius: 18px;
+    background: root.selected ? #6750a4 : (ta.has-hover ? #ffffff24 : #ffffff14);
+    animate background { duration: 150ms; easing: ease-out; }
+    HorizontalLayout {
+        padding-left: 16px;
+        padding-right: 16px;
+        Text {
+            text: root.label;
+            vertical-alignment: center;
+            font-size: 14px;
+            font-weight: 600;
+            color: #f4eefc;
+        }
+    }
+    ta := TouchArea {
+        clicked => { root.clicked(); }
+    }
+}
+
+// A single-line text field on a glass pill.
+component Field inherits Rectangle {
+    in-out property <string> text <=> input.text;
+    in property <string> placeholder;
+    in property <bool> auto-focus: false;
+    callback accepted();
+    height: 48px;
+    border-radius: 24px;
+    background: #ffffff1a;
+    init => {
+        if (root.auto-focus) {
+            input.focus();
+        }
+    }
+    Text {
+        x: 20px;
+        text: root.placeholder;
+        visible: input.text == "";
+        vertical-alignment: center;
+        height: parent.height;
+        font-size: 15px;
+        color: #b9aecb;
+    }
+    input := TextInput {
+        x: 20px;
+        width: parent.width - 40px;
+        height: parent.height;
+        vertical-alignment: center;
+        single-line: true;
+        font-size: 15px;
+        color: #f4eefc;
+        accepted => { root.accepted(); }
+    }
+}
+
+component TrackRow inherits Rectangle {
+    in property <Entry> entry;
+    in property <string> action-glyph;
+    in property <bool> action-active;
+    callback clicked();
+    callback action();
+    height: 64px;
+    border-radius: 14px;
+    background: ta.has-hover ? #ffffff14 : #00000000;
+    animate background { duration: 120ms; }
+    ta := TouchArea {
+        clicked => { root.clicked(); }
+    }
+    HorizontalLayout {
+        padding: 8px;
+        spacing: 12px;
+        Art {
+            width: 48px;
+            tint: root.entry.tint;
+            source: root.entry.art;
+            border-radius: 10px;
+        }
+        VerticalLayout {
+            alignment: center;
+            horizontal-stretch: 1;
+            Text {
+                text: root.entry.title;
+                overflow: elide;
+                font-size: 15px;
+                font-weight: 600;
+                color: #f4eefc;
+            }
+            Text {
+                text: root.entry.artist;
+                overflow: elide;
+                font-size: 13px;
+                color: #b9aecb;
+            }
+        }
+        Text {
+            text: root.entry.duration;
+            vertical-alignment: center;
+            font-size: 13px;
+            color: #b9aecb;
+        }
+        RoundButton {
+            glyph: root.action-glyph;
+            diameter: 40px;
+            icon-size: 20px;
+            fill: #00000000;
+            ink: root.action-active ? #ffb4c8 : #cfc6dc;
+            clicked => { root.action(); }
+        }
+    }
+}
+
+component SwitchRow inherits Rectangle {
+    in property <string> title;
+    in property <string> description;
+    in-out property <bool> on;
+    callback toggled(bool);
+    height: 72px;
+    border-radius: 20px;
+    background: #ffffff14;
+    HorizontalLayout {
+        padding-left: 20px;
+        padding-right: 20px;
+        spacing: 16px;
+        VerticalLayout {
+            alignment: center;
+            horizontal-stretch: 1;
+            Text {
+                text: root.title;
+                font-size: 16px;
+                font-weight: 600;
+                color: #f4eefc;
+            }
+            Text {
+                text: root.description;
+                overflow: elide;
+                font-size: 13px;
+                color: #b9aecb;
+            }
+        }
+        Rectangle {
+            width: 52px;
+            VerticalLayout {
+                alignment: center;
+                Rectangle {
+                    height: 32px;
+                    border-radius: 16px;
+                    background: root.on ? #6750a4 : #4a4458;
+                    animate background { duration: 150ms; }
+                    Rectangle {
+                        x: root.on ? parent.width - self.width - 4px : 4px;
+                        y: 4px;
+                        width: 24px;
+                        height: 24px;
+                        border-radius: 12px;
+                        background: root.on ? #ffffff : #cfc6dc;
+                        animate x { duration: 150ms; easing: ease-out; }
+                    }
+                }
+            }
+        }
+    }
+    TouchArea {
+        clicked => {
+            root.on = !root.on;
+            root.toggled(root.on);
+        }
+    }
+}
+
 export component AppWindow inherits Window {
     title: "TweMusic";
     preferred-width: 1100px;
@@ -322,7 +540,53 @@ export component AppWindow inherits Window {
     callback seek(float);
     callback toggle-like();
 
+    // Screens: 0 Home, 1 Library, 2 Settings, 3 Search
     in-out property <int> screen: 0;
+    in-out property <int> return-screen: 0;
+
+    // Search
+    in-out property <bool> search-open: false;
+    in-out property <string> query;
+    in property <string> search-status;
+    in property <[Entry]> results;
+    callback search(string);
+    callback play-result(int);
+    callback like-result(int);
+
+    // Library
+    in property <[string]> playlists;
+    in-out property <int> selected-playlist: 0;
+    in property <string> playlist-title;
+    in property <[Entry]> library-rows;
+    in-out property <string> new-playlist;
+    in-out property <string> import-url;
+    callback select-playlist(int);
+    callback create-playlist(string);
+    callback import-playlist(string);
+    callback play-playlist();
+    callback delete-playlist();
+    callback remove-track(int);
+    callback play-library(int);
+
+    // Settings
+    in-out property <bool> set-notifications: true;
+    in-out property <bool> set-tray: false;
+    in-out property <bool> set-dynamic-color: true;
+    callback settings-changed(string, bool);
+
+    function open-search() {
+        if (root.screen != 3) {
+            root.return-screen = root.screen;
+            root.screen = 3;
+        }
+        root.search-open = true;
+    }
+    function close-search() {
+        root.search-open = false;
+        if (root.results.length == 0) {
+            root.screen = root.return-screen;
+        }
+    }
 
     // Aurora: soft colour blobs behind everything.
     Rectangle {
@@ -388,9 +652,19 @@ export component AppWindow inherits Window {
                 font-weight: 700;
                 color: #f4eefc;
             }
+            Rectangle { horizontal-stretch: 1; }
+            VerticalLayout {
+                alignment: center;
+                RoundButton {
+                    glyph: Glyphs.search;
+                    diameter: 44px;
+                    fill: root.screen == 3 ? #4a3a7a : #00000000;
+                    clicked => { root.open-search(); }
+                }
+            }
         }
 
-        Flickable {
+        if root.screen == 0 : Flickable {
             VerticalLayout {
                 spacing: 20px;
                 padding-bottom: 16px;
@@ -438,6 +712,171 @@ export component AppWindow inherits Window {
             }
         }
 
+        // Search results
+        if root.screen == 3 : VerticalLayout {
+            spacing: 8px;
+            padding-top: root.search-open ? 64px : 0px;
+            Text {
+                text: root.search-status != "" ? root.search-status : "Search for songs, artists and albums.";
+                font-size: 14px;
+                color: #b9aecb;
+            }
+            Flickable {
+                vertical-stretch: 1;
+                VerticalLayout {
+                    spacing: 2px;
+                    padding-bottom: 12px;
+                    for entry[i] in root.results : TrackRow {
+                        entry: entry;
+                        action-glyph: entry.liked ? Glyphs.heart-filled : Glyphs.heart;
+                        action-active: entry.liked;
+                        clicked => { root.play-result(i); }
+                        action => { root.like-result(i); }
+                    }
+                }
+            }
+        }
+
+        // Library
+        if root.screen == 1 : Flickable {
+            VerticalLayout {
+                spacing: 14px;
+                padding-bottom: 16px;
+                Text {
+                    text: "Library";
+                    font-size: 32px;
+                    font-weight: 700;
+                    color: #f4eefc;
+                }
+                Text {
+                    text: "Liked songs and playlists are saved on this computer.";
+                    font-size: 14px;
+                    color: #b9aecb;
+                }
+                HorizontalLayout {
+                    spacing: 8px;
+                    Field {
+                        horizontal-stretch: 1;
+                        text <=> root.new-playlist;
+                        placeholder: "New playlist name";
+                        accepted => { root.create-playlist(root.new-playlist); }
+                    }
+                    VerticalLayout {
+                        alignment: center;
+                        TextButton {
+                            text: "Create";
+                            clicked => { root.create-playlist(root.new-playlist); }
+                        }
+                    }
+                }
+                HorizontalLayout {
+                    spacing: 8px;
+                    Field {
+                        horizontal-stretch: 1;
+                        text <=> root.import-url;
+                        placeholder: "Import a public playlist link";
+                        accepted => { root.import-playlist(root.import-url); }
+                    }
+                    VerticalLayout {
+                        alignment: center;
+                        TextButton {
+                            text: "Import";
+                            clicked => { root.import-playlist(root.import-url); }
+                        }
+                    }
+                }
+                Flickable {
+                    height: 40px;
+                    HorizontalLayout {
+                        spacing: 8px;
+                        for name[i] in root.playlists : Chip {
+                            label: name;
+                            selected: root.selected-playlist == i;
+                            clicked => { root.select-playlist(i); }
+                        }
+                    }
+                }
+                HorizontalLayout {
+                    spacing: 8px;
+                    Text {
+                        text: root.playlist-title;
+                        vertical-alignment: center;
+                        horizontal-stretch: 1;
+                        overflow: elide;
+                        font-size: 22px;
+                        font-weight: 700;
+                        color: #f4eefc;
+                    }
+                    VerticalLayout {
+                        alignment: center;
+                        TextButton {
+                            text: "Play all";
+                            enabled: root.library-rows.length > 0;
+                            clicked => { root.play-playlist(); }
+                        }
+                    }
+                    if root.selected-playlist > 0 : VerticalLayout {
+                        alignment: center;
+                        TextButton {
+                            text: "Delete";
+                            destructive: true;
+                            clicked => { root.delete-playlist(); }
+                        }
+                    }
+                }
+                if root.library-rows.length == 0 : Text {
+                    text: "Nothing here yet. Like songs or add them from search results, or import a playlist link.";
+                    wrap: word-wrap;
+                    font-size: 14px;
+                    color: #b9aecb;
+                }
+                for entry[i] in root.library-rows : TrackRow {
+                    entry: entry;
+                    action-glyph: Glyphs.close;
+                    clicked => { root.play-library(i); }
+                    action => { root.remove-track(i); }
+                }
+            }
+        }
+
+        // Settings
+        if root.screen == 2 : Flickable {
+            VerticalLayout {
+                spacing: 12px;
+                padding-bottom: 16px;
+                Text {
+                    text: "Settings";
+                    font-size: 32px;
+                    font-weight: 700;
+                    color: #f4eefc;
+                }
+                Text {
+                    text: "Saved next to your library. The tray and notifications start working in this window with the next update.";
+                    wrap: word-wrap;
+                    font-size: 14px;
+                    color: #b9aecb;
+                }
+                SwitchRow {
+                    title: "Track notifications";
+                    description: "Show a notification when a new song starts while the window is in the background.";
+                    on <=> root.set-notifications;
+                    toggled(value) => { root.settings-changed("notifications", value); }
+                }
+                SwitchRow {
+                    title: "Keep playing in the tray";
+                    description: "Closing the window hides it to the tray and playback continues.";
+                    on <=> root.set-tray;
+                    toggled(value) => { root.settings-changed("tray", value); }
+                }
+                SwitchRow {
+                    title: "Dynamic colour";
+                    description: "Tint the app with colours from the album art of the current song.";
+                    on <=> root.set-dynamic-color;
+                    toggled(value) => { root.settings-changed("dynamic-color", value); }
+                }
+            }
+        }
+
         // Player: one glass card, the same width as the column.
         Rectangle {
             height: 112px;
@@ -471,34 +910,46 @@ export component AppWindow inherits Window {
                             color: #b9aecb;
                         }
                     }
-                    RoundButton {
-                        glyph: root.now-liked
-                            ? "M12 21.35l-1.45-1.32C5.4 15.36 2 12.28 2 8.5 2 5.42 4.42 3 7.5 3c1.74 0 3.41.81 4.5 2.09C13.09 3.81 14.76 3 16.5 3 19.58 3 22 5.42 22 8.5c0 3.78-3.4 6.86-8.55 11.54L12 21.35z"
-                            : "M16.5 3c-1.74 0-3.41.81-4.5 2.09C10.91 3.81 9.24 3 7.5 3 4.42 3 2 5.42 2 8.5c0 3.78 3.4 6.86 8.55 11.54L12 21.35l1.45-1.32C18.6 15.36 22 12.28 22 8.5 22 5.42 19.58 3 16.5 3zm-4.4 15.55l-.1.1-.1-.1C7.14 14.24 4 11.39 4 8.5 4 6.5 5.5 5 7.5 5c1.54 0 3.04.99 3.57 2.36h1.87C13.46 5.99 14.96 5 16.5 5c2 0 3.5 1.5 3.5 3.5 0 2.89-3.14 5.74-7.9 10.05z";
-                        fill: #00000000;
-                        ink: root.now-liked ? #ffb4c8 : #e8e0f0;
-                        diameter: 40px;
-                        icon-size: 22px;
-                        clicked => { root.toggle-like(); }
+                    VerticalLayout {
+                        alignment: center;
+                        RoundButton {
+                            glyph: root.now-liked
+                                ? "M12 21.35l-1.45-1.32C5.4 15.36 2 12.28 2 8.5 2 5.42 4.42 3 7.5 3c1.74 0 3.41.81 4.5 2.09C13.09 3.81 14.76 3 16.5 3 19.58 3 22 5.42 22 8.5c0 3.78-3.4 6.86-8.55 11.54L12 21.35z"
+                                : "M16.5 3c-1.74 0-3.41.81-4.5 2.09C10.91 3.81 9.24 3 7.5 3 4.42 3 2 5.42 2 8.5c0 3.78 3.4 6.86 8.55 11.54L12 21.35l1.45-1.32C18.6 15.36 22 12.28 22 8.5 22 5.42 19.58 3 16.5 3zm-4.4 15.55l-.1.1-.1-.1C7.14 14.24 4 11.39 4 8.5 4 6.5 5.5 5 7.5 5c1.54 0 3.04.99 3.57 2.36h1.87C13.46 5.99 14.96 5 16.5 5c2 0 3.5 1.5 3.5 3.5 0 2.89-3.14 5.74-7.9 10.05z";
+                            fill: #00000000;
+                            ink: root.now-liked ? #ffb4c8 : #e8e0f0;
+                            diameter: 40px;
+                            icon-size: 22px;
+                            clicked => { root.toggle-like(); }
+                        }
                     }
-                    RoundButton {
-                        glyph: "M6 6h2v12H6zm3.5 6l8.5 6V6z";
-                        diameter: 40px;
-                        icon-size: 22px;
-                        clicked => { root.previous(); }
+                    VerticalLayout {
+                        alignment: center;
+                        RoundButton {
+                            glyph: "M6 6h2v12H6zm3.5 6l8.5 6V6z";
+                            diameter: 40px;
+                            icon-size: 22px;
+                            clicked => { root.previous(); }
+                        }
                     }
-                    RoundButton {
-                        glyph: root.playing ? "M6 19h4V5H6v14zm8-14v14h4V5h-4z" : "M8 5v14l11-7z";
-                        diameter: 48px;
-                        fill: #6750a4;
-                        ink: #ffffff;
-                        clicked => { root.toggle-pause(); }
+                    VerticalLayout {
+                        alignment: center;
+                        RoundButton {
+                            glyph: root.playing ? "M6 19h4V5H6v14zm8-14v14h4V5h-4z" : "M8 5v14l11-7z";
+                            diameter: 48px;
+                            fill: #6750a4;
+                            ink: #ffffff;
+                            clicked => { root.toggle-pause(); }
+                        }
                     }
-                    RoundButton {
-                        glyph: "M6 18l8.5-6L6 6v12zM16 6v12h2V6h-2z";
-                        diameter: 40px;
-                        icon-size: 22px;
-                        clicked => { root.next(); }
+                    VerticalLayout {
+                        alignment: center;
+                        RoundButton {
+                            glyph: "M6 18l8.5-6L6 6v12zM16 6v12h2V6h-2z";
+                            diameter: 40px;
+                            icon-size: 22px;
+                            clicked => { root.next(); }
+                        }
                     }
                 }
                 HorizontalLayout {
@@ -527,6 +978,45 @@ export component AppWindow inherits Window {
             }
         }
         Rectangle { height: 24px; }
+    }
+
+    // Search box: floats under the top bar. Tapping anywhere else on the page collapses it.
+    if root.screen == 3 && root.search-open : TouchArea {
+        x: 32px + 80px + 24px;
+        y: 64px + 56px;
+        width: parent.width - self.x;
+        height: parent.height - self.y;
+        clicked => { root.close-search(); }
+    }
+    if root.screen == 3 && root.search-open : Rectangle {
+        x: 32px + 80px + 24px;
+        y: 64px;
+        width: parent.width - self.x - 32px;
+        height: 48px;
+        border-radius: 24px;
+        background: #2a2438;
+        HorizontalLayout {
+            padding-right: 6px;
+            spacing: 6px;
+            Field {
+                horizontal-stretch: 1;
+                text <=> root.query;
+                placeholder: "Search songs, artists, albums";
+                auto-focus: true;
+                accepted => { root.search(root.query); }
+            }
+            VerticalLayout {
+                alignment: center;
+                RoundButton {
+                    glyph: Glyphs.search;
+                    diameter: 36px;
+                    icon-size: 20px;
+                    fill: #6750a4;
+                    ink: #ffffff;
+                    clicked => { root.search(root.query); }
+                }
+            }
+        }
     }
 
     // Message bar
