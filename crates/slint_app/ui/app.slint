@@ -679,8 +679,12 @@ export component AppWindow inherits Window {
             }
         }
 
-        if root.screen == 0 : Flickable {
-            viewport-width: root.column-width;
+        if root.screen == 0 : Rectangle {
+            vertical-stretch: 1;
+            Flickable {
+                width: parent.width;
+                height: parent.height;
+            content-width: root.column-width;
             VerticalLayout {
                 width: root.column-width;
                 spacing: 20px;
@@ -728,6 +732,7 @@ export component AppWindow inherits Window {
                 }
             }
         }
+        }
 
         // Search results
         if root.screen == 3 : VerticalLayout {
@@ -738,9 +743,12 @@ export component AppWindow inherits Window {
                 font-size: 14px;
                 color: Palette.on-surface-variant;
             }
-            Flickable {
+            Rectangle {
                 vertical-stretch: 1;
-                viewport-width: root.column-width;
+                Flickable {
+                    width: parent.width;
+                    height: parent.height;
+                content-width: root.column-width;
                 VerticalLayout {
                     width: root.column-width;
                     spacing: 2px;
@@ -754,11 +762,16 @@ export component AppWindow inherits Window {
                     }
                 }
             }
+            }
         }
 
         // Library
-        if root.screen == 1 : Flickable {
-            viewport-width: root.column-width;
+        if root.screen == 1 : Rectangle {
+            vertical-stretch: 1;
+            Flickable {
+                width: parent.width;
+                height: parent.height;
+            content-width: root.column-width;
             VerticalLayout {
                 width: root.column-width;
                 spacing: 14px;
@@ -859,10 +872,15 @@ export component AppWindow inherits Window {
                 }
             }
         }
+        }
 
         // Settings
-        if root.screen == 2 : Flickable {
-            viewport-width: root.column-width;
+        if root.screen == 2 : Rectangle {
+            vertical-stretch: 1;
+            Flickable {
+                width: parent.width;
+                height: parent.height;
+            content-width: root.column-width;
             VerticalLayout {
                 width: root.column-width;
                 spacing: 12px;
@@ -898,6 +916,7 @@ export component AppWindow inherits Window {
                     toggled(value) => { root.settings-changed("dynamic-color", value); }
                 }
             }
+        }
         }
 
         // Player: one glass card, the same width as the column.
