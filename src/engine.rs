@@ -670,6 +670,9 @@ impl Engine {
                     }
                 }
             }
+            if let Some(since) = self.loading_since {
+                eprintln!("[timing] mpv opened the stream and started playing after {:.1}s", since.elapsed().as_secs_f32());
+            }
             self.played_something = true;
             self.loading_since = None;
         }
