@@ -586,6 +586,9 @@ export component AppWindow inherits Window {
     in-out property <bool> set-dynamic-color: true;
     callback settings-changed(string, bool);
 
+    // The page column: right of the rail (32 + 80 + 24), with a 32 margin on the right.
+    property <length> column-width: root.width - 136px - 32px;
+
     function open-search() {
         if (root.screen != 3) {
             root.return-screen = root.screen;
@@ -678,7 +681,7 @@ export component AppWindow inherits Window {
 
         if root.screen == 0 : Flickable {
             VerticalLayout {
-                width: parent.width;
+                width: root.column-width;
                 spacing: 20px;
                 padding-bottom: 16px;
                 Text {
@@ -737,7 +740,7 @@ export component AppWindow inherits Window {
             Flickable {
                 vertical-stretch: 1;
                 VerticalLayout {
-                    width: parent.width;
+                    width: root.column-width;
                     spacing: 2px;
                     padding-bottom: 12px;
                     for entry[i] in root.results : TrackRow {
@@ -754,7 +757,7 @@ export component AppWindow inherits Window {
         // Library
         if root.screen == 1 : Flickable {
             VerticalLayout {
-                width: parent.width;
+                width: root.column-width;
                 spacing: 14px;
                 padding-bottom: 16px;
                 Text {
@@ -857,7 +860,7 @@ export component AppWindow inherits Window {
         // Settings
         if root.screen == 2 : Flickable {
             VerticalLayout {
-                width: parent.width;
+                width: root.column-width;
                 spacing: 12px;
                 padding-bottom: 16px;
                 Text {
