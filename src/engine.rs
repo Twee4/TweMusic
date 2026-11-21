@@ -1065,6 +1065,10 @@ impl Engine {
                     let (tx, rx) = mpsc::channel();
                     thread::spawn(move || {
                         let hue = dynamic_color::hue_from_url(&url);
+                        match hue {
+                            Some(hue) => eprintln!("[colour] artwork hue {:.0} degrees ({url})", hue.to_degrees().rem_euclid(360.0)),
+                            None => eprintln!("[colour] no hue from the artwork (greyscale, download failed or host not allowed): {url}"),
+                        }
                         let _ = tx.send((url, hue));
                     });
                     self.art_rx = Some(rx);
