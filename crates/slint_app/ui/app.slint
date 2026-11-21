@@ -18,6 +18,10 @@ export global Palette {
     in property <color> aurora-b: #3b6a8a;
     in property <color> on-surface: #f4eefc;
     in property <color> on-surface-variant: #b9aecb;
+    // Cards, the rail and the player bar: translucent, tinted by the album art.
+    in property <color> glass: #ffffff14;
+    in property <color> glass-hover: #ffffff26;
+    in property <color> glass-solid: #2a2438;
 }
 
 struct Entry {
@@ -63,7 +67,7 @@ component RailItem inherits Rectangle {
                 width: 56px;
                 height: 32px;
                 border-radius: 16px;
-                background: root.selected ? Palette.accent : (ta.has-hover ? #ffffff14 : #00000000);
+                background: root.selected ? Palette.accent : (ta.has-hover ? Palette.glass : #00000000);
                 animate background { duration: 150ms; easing: ease-out; }
                 Icon {
                     glyph: root.glyph;
@@ -105,7 +109,7 @@ component RoundButton inherits Rectangle {
     in property <string> glyph;
     in property <length> diameter: 48px;
     in property <length> icon-size: 24px;
-    in property <color> fill: #ffffff1f;
+    in property <color> fill: Palette.glass-hover;
     in property <color> ink: #e8e0f0;
     callback clicked();
     width: diameter;
@@ -128,7 +132,7 @@ component QuickCard inherits Rectangle {
     callback clicked();
     height: 56px;
     border-radius: 12px;
-    background: ta.has-hover ? #ffffff26 : #ffffff14;
+    background: ta.has-hover ? Palette.glass-hover : Palette.glass;
     animate background { duration: 120ms; }
     HorizontalLayout {
         spacing: 12px;
@@ -281,7 +285,7 @@ component SeekBar inherits Rectangle {
         y: (parent.height - self.height) / 2;
         height: 4px;
         border-radius: 2px;
-        background: #ffffff26;
+        background: Palette.glass-hover;
         Rectangle {
             x: 0px;
             width: parent.width * clamp(root.progress, 0, 1);
@@ -317,7 +321,7 @@ component TextButton inherits Rectangle {
     border-radius: 20px;
     opacity: root.enabled ? 1.0 : 0.4;
     background: root.destructive ? (ta.has-hover ? #8c3a4a : #7a2f3f)
-        : (root.filled ? (ta.has-hover ? Palette.accent.brighter(0.25) : Palette.accent) : (ta.has-hover ? #ffffff26 : #ffffff14));
+        : (root.filled ? (ta.has-hover ? Palette.accent.brighter(0.25) : Palette.accent) : (ta.has-hover ? Palette.glass-hover : Palette.glass));
     animate background { duration: 120ms; }
     HorizontalLayout {
         padding-left: 20px;
@@ -342,7 +346,7 @@ component Chip inherits Rectangle {
     callback clicked();
     height: 36px;
     border-radius: 18px;
-    background: root.selected ? Palette.accent : (ta.has-hover ? #ffffff24 : #ffffff14);
+    background: root.selected ? Palette.accent : (ta.has-hover ? Palette.glass-hover : Palette.glass);
     animate background { duration: 150ms; easing: ease-out; }
     HorizontalLayout {
         padding-left: 16px;
@@ -368,7 +372,7 @@ component Field inherits Rectangle {
     callback accepted();
     height: 48px;
     border-radius: 24px;
-    background: #ffffff1a;
+    background: Palette.glass;
     init => {
         if (root.auto-focus) {
             input.focus();
@@ -403,7 +407,7 @@ component TrackRow inherits Rectangle {
     callback action();
     height: 64px;
     border-radius: 14px;
-    background: ta.has-hover ? #ffffff14 : #00000000;
+    background: ta.has-hover ? Palette.glass : #00000000;
     animate background { duration: 120ms; }
     ta := TouchArea {
         clicked => { root.clicked(); }
@@ -458,7 +462,7 @@ component SwitchRow inherits Rectangle {
     callback toggled(bool);
     height: 72px;
     border-radius: 20px;
-    background: #ffffff14;
+    background: Palette.glass;
     HorizontalLayout {
         padding-left: 20px;
         padding-right: 20px;
@@ -626,7 +630,7 @@ export component AppWindow inherits Window {
         width: 80px;
         height: 3 * 64px + 2 * 4px + 24px;
         border-radius: 28px;
-        background: #ffffff12;
+        background: Palette.glass;
         VerticalLayout {
             padding-top: 12px;
             padding-bottom: 12px;
@@ -927,7 +931,7 @@ export component AppWindow inherits Window {
         Rectangle {
             height: 112px;
             border-radius: 28px;
-            background: #ffffff14;
+            background: Palette.glass;
             VerticalLayout {
                 padding: 16px;
                 spacing: 6px;
@@ -1040,7 +1044,7 @@ export component AppWindow inherits Window {
         width: parent.width - self.x - 32px;
         height: 48px;
         border-radius: 24px;
-        background: #2a2438;
+        background: Palette.glass-solid;
         HorizontalLayout {
             padding-right: 6px;
             spacing: 6px;
