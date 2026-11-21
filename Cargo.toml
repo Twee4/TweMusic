@@ -20,10 +20,11 @@ twe_innertube = { path = "crates/innertube" }
 twe_player = { path = "crates/player" }
 
 [workspace]
-members = ["crates/innertube", "crates/player", "src-tauri"]
+members = ["crates/innertube", "crates/player", "crates/slint_app", "src-tauri"]
 # Plain `cargo build` / `cargo test` (and CI) cover the egui app and the pure-Rust crates in
 # crates/ (twe_innertube, twe_player). They don't need the WebKitGTK system libraries that the
 # Tauri crate requires; build the webview app explicitly with `cargo build -p twe_music_tauri`.
+# The Slint front end is also built on request: `cargo run --release -p twe_slint`.
 default-members = [".", "crates/innertube", "crates/player"]
 
 [profile.dev]
