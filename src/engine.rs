@@ -4,7 +4,7 @@
 //! nothing here blocks the UI.
 
 use std::{
-    collections::HashSet,
+    collections::{HashMap, HashSet},
     path::PathBuf,
     process::Command,
     sync::mpsc::{self, Receiver, Sender, TryRecvError},
@@ -32,6 +32,10 @@ use crate::{
 
 /// How long to wait before looking for today's pick again after a failed attempt.
 const PICK_RETRY: Duration = Duration::from_secs(120);
+/// How long a looked-up stream address is reused (they last about six hours).
+const CACHE_MAX_AGE: Duration = Duration::from_secs(4 * 60 * 60);
+/// How many songs ahead of the playing one get their stream looked up in advance.
+const LOOK_AHEAD: usize = 3;
 /// How often mpv is asked for its position.
 const POLL_INTERVAL: Duration = Duration::from_millis(500);
 
@@ -99,6 +103,10 @@ pub struct Engine {
     prefetch_rx: Option<(TrackId, Receiver<Result<Stream, String>>)>,
     prefetch_tried: Option<TrackId>,
     queued_next: Option<(TrackId, Instant)>,
+    /// Streams already looked up, with when they were issued: playing one of these is instant.
+    stream_cache: HashMap<TrackId, (Stream, Instant)>,
+    ahead_rx: Option<(TrackId, Receiver<Result<Stream, String>>)>,
+    ahead_failed: HashSet<TrackId>,
 
     // Desktop integration.
     media: Option<Media>,
@@ -172,6 +180,9 @@ impl Engine {
             prefetch_rx: None,
             prefetch_tried: None,
             queued_next: None,
+            stream_cache: HashMap::new(),
+            ahead_rx: None,
+            ahead_failed: HashSet::new(),
             media,
             media_rx,
             media_synced: None,
@@ -273,6 +284,14 @@ impl Engine {
             self.notify("Invalid video ID.");
             return;
         };
+        if let Some((stream, issued)) = self.cached_stream(track.id) {
+            eprintln!("[timing] {video_id}: stream was looked up in advance");
+            self.stream_rx = None;
+            self.pending_track = None;
+            self.start_stream(track, &stream);
+            self.stream_issued = Some(issued);
+            return;
+        }
         let browser = self.ytdlp_browser();
         let (tx, rx) = mpsc::channel();
         thread::spawn(move || {
@@ -553,6 +572,7 @@ impl Engine {
         self.poll_pick();
         self.poll_import();
         self.poll_prefetch();
+        self.poll_ahead();
         self.update_stream_refresh();
         self.poll_media();
         self.poll_tray();
@@ -568,7 +588,10 @@ impl Engine {
         self.stream_rx = None;
         let Some(track) = self.pending_track.take() else { return };
         match result {
-            Ok(stream) => self.start_stream(&track, &stream),
+            Ok(stream) => {
+                self.stream_cache.insert(track.id, (stream.clone(), Instant::now()));
+                self.start_stream(&track, &stream);
+            }
             Err(message) => {
                 self.message = None;
                 self.notify(message);
@@ -677,6 +700,7 @@ impl Engine {
             self.loading_since = None;
         }
         self.handle_gapless(position, duration);
+        self.warm_ahead();
         if !idle {
             return;
         }
@@ -704,6 +728,7 @@ impl Engine {
             let video_id = track.video_id.clone().filter(|id| ytmusic::youtube_music_url(id).is_some());
             if let (Some(video_id), true) = (video_id, self.direct_failed != Some(track.id)) {
                 self.direct_failed = Some(track.id);
+                self.stream_cache.remove(&track.id);
                 let browser = self.ytdlp_browser();
                 let (tx, rx) = mpsc::channel();
                 thread::spawn(move || {
@@ -778,7 +803,56 @@ impl Engine {
         }
         let Some(track) = self.state.tracks.iter().find(|track| track.id == next_id).cloned() else { return };
         self.prefetch_tried = Some(next_id);
+        if let Some((stream, issued)) = self.cached_stream(next_id) {
+            if let Some(player) = self.mpv.as_mut() {
+                if player.queue_stream(&stream).is_ok() {
+                    self.queued_next = Some((next_id, issued));
+                }
+            }
+            return;
+        }
         self.prefetch_rx = self.resolve_in_background(&track).map(|rx| (next_id, rx));
+    }
+
+    /// A stream looked up earlier that is still good, with when it was issued.
+    fn cached_stream(&self, id: TrackId) -> Option<(Stream, Instant)> {
+        self.stream_cache.get(&id).filter(|(_, issued)| issued.elapsed() < CACHE_MAX_AGE).cloned()
+    }
+
+    /// While a song plays, looks up the streams of the next few songs one at a time, so Next
+    /// (even pressed several times in a row) and replays start at once.
+    fn warm_ahead(&mut self) {
+        if self.ahead_rx.is_some() || self.prefetch_rx.is_some() {
+            return;
+        }
+        self.stream_cache.retain(|_, (_, issued)| issued.elapsed() < CACHE_MAX_AGE);
+        let target = self.state.up_next(LOOK_AHEAD).into_iter().find(|track| {
+            !self.stream_cache.contains_key(&track.id) && !self.ahead_failed.contains(&track.id)
+        });
+        let Some(track) = target else { return };
+        self.ahead_rx = self.resolve_in_background(&track).map(|rx| (track.id, rx));
+        if self.ahead_rx.is_none() {
+            self.ahead_failed.insert(track.id);
+        }
+    }
+
+    fn poll_ahead(&mut self) {
+        let Some((id, rx)) = &self.ahead_rx else { return };
+        let id = *id;
+        let result = match rx.try_recv() {
+            Ok(result) => result,
+            Err(TryRecvError::Empty) => return,
+            Err(TryRecvError::Disconnected) => Err(String::new()),
+        };
+        self.ahead_rx = None;
+        match result {
+            Ok(stream) => {
+                self.stream_cache.insert(id, (stream, Instant::now()));
+            }
+            Err(_) => {
+                self.ahead_failed.insert(id);
+            }
+        }
     }
 
     fn poll_prefetch(&mut self) {
@@ -792,6 +866,7 @@ impl Engine {
         self.prefetch_rx = None;
         // A failed lookup just means the normal path (resolve at the end of the track) is used.
         let Ok(stream) = result else { return };
+        self.stream_cache.insert(id, (stream.clone(), Instant::now()));
         if self.state.adjacent_remote(true) != Some(id) {
             return;
         }
