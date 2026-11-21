@@ -7,20 +7,26 @@ use std::{
     collections::HashSet,
     path::PathBuf,
     process::Command,
-    sync::mpsc::{self, Receiver, TryRecvError},
+    sync::mpsc::{self, Receiver, Sender, TryRecvError},
     thread,
     time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
 
+use souvlaki::{MediaControlEvent, MediaPosition};
 use twe_innertube::Stream;
 
 use crate::{
+    dynamic_color::{self, Transition},
     import,
     library::{self, Library, SavedTrack},
+    media::Media,
     models::{Track, TrackId},
     mpv::{MpvError, MpvPlayer},
+    notifications, prefetch,
     settings::{self, Settings},
     state::{AppState, PlaybackStatus},
+    theme::ColorScheme,
+    tray::{TrayCommand, TrayHandle},
     ytdlp, ytmusic,
 };
 
@@ -28,6 +34,15 @@ use crate::{
 const PICK_RETRY: Duration = Duration::from_secs(120);
 /// How often mpv is asked for its position.
 const POLL_INTERVAL: Duration = Duration::from_millis(500);
+
+/// Things the engine asks the window to do.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Action {
+    /// Bring the window back (tray icon clicked).
+    ShowWindow,
+    /// Quit the app (tray menu).
+    Quit,
+}
 
 /// The song chosen for today, why, and similar songs fetched from search.
 #[derive(Clone)]
@@ -75,6 +90,34 @@ pub struct Engine {
     pub pick: Option<DailyPick>,
     pick_rx: Option<Receiver<Result<DailyPick, String>>>,
     pick_failed: Option<Instant>,
+
+    // Gapless playback and stream refresh.
+    stream_issued: Option<Instant>,
+    refresh_rx: Option<(TrackId, Receiver<Result<Stream, String>>)>,
+    refresh_backoff: Option<Instant>,
+    resume_at: Option<f64>,
+    prefetch_rx: Option<(TrackId, Receiver<Result<Stream, String>>)>,
+    prefetch_tried: Option<TrackId>,
+    queued_next: Option<(TrackId, Instant)>,
+
+    // Desktop integration.
+    media: Option<Media>,
+    media_rx: Receiver<MediaControlEvent>,
+    media_synced: Option<(Option<TrackId>, PlaybackStatus)>,
+    tray: Option<TrayHandle>,
+    tray_tx: Sender<TrayCommand>,
+    tray_rx: Receiver<TrayCommand>,
+    tray_synced: Option<(Option<TrackId>, PlaybackStatus)>,
+    actions: Vec<Action>,
+    /// Set by the window: true while it is hidden to the tray, so notifications make sense.
+    pub window_hidden: bool,
+    announced: Option<TrackId>,
+
+    // Dynamic colour from the album art.
+    scheme: Transition,
+    art_url: Option<String>,
+    art_rx: Option<Receiver<(String, Option<f32>)>>,
+    scheme_changed: bool,
 }
 
 impl Default for Engine {
@@ -89,6 +132,9 @@ impl Engine {
         let library = library_path.as_deref().map(Library::load_from).unwrap_or_else(Library::new);
         let settings_path = settings::default_path();
         let settings = settings_path.as_deref().map(Settings::load_from).unwrap_or_default();
+        let (media_tx, media_rx) = mpsc::channel();
+        let media = Media::new(media_tx, || {});
+        let (tray_tx, tray_rx) = mpsc::channel();
         let mut engine = Self {
             state: AppState::new(),
             library,
@@ -119,8 +165,30 @@ impl Engine {
             pick: None,
             pick_rx: None,
             pick_failed: None,
+            stream_issued: None,
+            refresh_rx: None,
+            refresh_backoff: None,
+            resume_at: None,
+            prefetch_rx: None,
+            prefetch_tried: None,
+            queued_next: None,
+            media,
+            media_rx,
+            media_synced: None,
+            tray: None,
+            tray_tx,
+            tray_rx,
+            tray_synced: None,
+            actions: Vec::new(),
+            window_hidden: false,
+            announced: None,
+            scheme: Transition::new(),
+            art_url: None,
+            art_rx: None,
+            scheme_changed: false,
         };
         engine.read_clock();
+        engine.apply_tray();
         engine
     }
 
@@ -226,6 +294,12 @@ impl Engine {
                 self.state.play_track(track.id);
                 self.library.record_play(track);
                 self.save_library();
+                self.stream_issued = Some(Instant::now());
+                self.queued_next = None;
+                self.prefetch_rx = None;
+                self.prefetch_tried = None;
+                self.refresh_rx = None;
+                self.resume_at = None;
                 if self.state.adjacent_remote(true).is_none() {
                     self.start_related(track);
                 }
@@ -470,6 +544,10 @@ impl Engine {
         self.poll_search();
         self.poll_pick();
         self.poll_import();
+        self.poll_prefetch();
+        self.update_stream_refresh();
+        self.poll_media();
+        self.poll_tray();
     }
 
     fn poll_stream(&mut self) {
@@ -566,9 +644,28 @@ impl Engine {
             if !self.played_something {
                 self.message = None;
             }
+            // Announce each track once, including one that followed gaplessly or was refreshed.
+            let current = self.state.current_track().map(|track| track.id);
+            if current != self.announced {
+                self.announced = current;
+                if self.settings.notifications && self.window_hidden {
+                    if let Some(track) = self.state.current_track() {
+                        notifications::show_track(track);
+                    }
+                }
+            }
+            // A refreshed stream starts from the beginning: go back to where it was.
+            if position.is_some_and(|value| value < 3.0) {
+                if let Some(at) = self.resume_at.take() {
+                    if let Some(player) = self.mpv.as_mut() {
+                        let _ = player.seek_to(at);
+                    }
+                }
+            }
             self.played_something = true;
             self.loading_since = None;
         }
+        self.handle_gapless(position, duration);
         if !idle {
             return;
         }
@@ -623,6 +720,274 @@ impl Engine {
             self.library.add_listening(unix_day(), seconds);
             self.save_library();
         }
+    }
+}
+
+
+// ---- Gapless playback, stream refresh, desktop integration, colour ----------------------------
+
+impl Engine {
+    /// Resolves `track`'s stream on a worker thread, for prefetching or refreshing.
+    fn resolve_in_background(&self, track: &Track) -> Option<Receiver<Result<Stream, String>>> {
+        let video_id = track.video_id.clone().filter(|id| ytmusic::youtube_music_url(id).is_some())?;
+        let browser = self.ytdlp_browser();
+        let (tx, rx) = mpsc::channel();
+        thread::spawn(move || {
+            let _ = tx.send(ytdlp::resolve(&video_id, Some(browser.as_str())));
+        });
+        Some(rx)
+    }
+
+    /// Keeps playback gapless: shortly before a track ends, looks up the next one and queues
+    /// it in mpv, and notices when mpv has moved on to it by itself.
+    fn handle_gapless(&mut self, position: Option<f64>, duration: Option<f64>) {
+        if self.stream_issued.is_none() {
+            return;
+        }
+        let next = self.state.adjacent_remote(true);
+        if let Some((queued, _)) = self.queued_next {
+            if self.mpv.as_mut().and_then(|player| player.playlist_pos()) == Some(1) {
+                self.finish_advance(queued);
+            } else if next != Some(queued) {
+                // The queue changed under the prefetched entry: drop it and look again.
+                if let Some(player) = self.mpv.as_mut() {
+                    player.clear_queued();
+                }
+                self.queued_next = None;
+                self.prefetch_tried = None;
+            }
+            return;
+        }
+        if self.prefetch_rx.is_some() || !prefetch::should_prefetch(position, duration) {
+            return;
+        }
+        let Some(next_id) = next else { return };
+        if self.prefetch_tried == Some(next_id) {
+            return;
+        }
+        let Some(track) = self.state.tracks.iter().find(|track| track.id == next_id).cloned() else { return };
+        self.prefetch_tried = Some(next_id);
+        self.prefetch_rx = self.resolve_in_background(&track).map(|rx| (next_id, rx));
+    }
+
+    fn poll_prefetch(&mut self) {
+        let Some((id, rx)) = &self.prefetch_rx else { return };
+        let id = *id;
+        let result = match rx.try_recv() {
+            Ok(result) => result,
+            Err(TryRecvError::Empty) => return,
+            Err(TryRecvError::Disconnected) => Err(String::new()),
+        };
+        self.prefetch_rx = None;
+        // A failed lookup just means the normal path (resolve at the end of the track) is used.
+        let Ok(stream) = result else { return };
+        if self.state.adjacent_remote(true) != Some(id) {
+            return;
+        }
+        if let Some(player) = self.mpv.as_mut() {
+            if player.queue_stream(&stream).is_ok() {
+                self.queued_next = Some((id, Instant::now()));
+            }
+        }
+    }
+
+    /// mpv has started the queued track by itself: make it the current one.
+    fn finish_advance(&mut self, id: TrackId) {
+        let issued = self.queued_next.take().map(|(_, issued)| issued);
+        if let Some(player) = self.mpv.as_mut() {
+            player.drop_finished_entry();
+        }
+        let Some(track) = self.state.tracks.iter().find(|track| track.id == id).cloned() else { return };
+        self.state.play_track(id);
+        self.library.record_play(&track);
+        self.save_library();
+        self.stream_issued = issued.or(Some(Instant::now()));
+        self.prefetch_tried = None;
+        self.position = None;
+        self.duration = None;
+        if self.state.adjacent_remote(true).is_none() {
+            self.start_related(&track);
+        }
+    }
+
+    /// Looks the current stream up again when its address is about to expire, then resumes from
+    /// the same position (also while paused, so resuming later still works).
+    fn update_stream_refresh(&mut self) {
+        if let Some((id, rx)) = &self.refresh_rx {
+            let id = *id;
+            let result = match rx.try_recv() {
+                Ok(result) => Some(result),
+                Err(TryRecvError::Empty) => None,
+                Err(TryRecvError::Disconnected) => Some(Err(String::new())),
+            };
+            if let Some(result) = result {
+                self.refresh_rx = None;
+                if let (Ok(stream), true) = (result, self.state.current_track().map(|track| track.id) == Some(id)) {
+                    if let Some(player) = self.mpv.as_mut() {
+                        let at = player.position();
+                        if player.load_stream(&stream).is_ok() {
+                            self.resume_at = at.filter(|value| *value > 1.0);
+                            self.stream_issued = Some(Instant::now());
+                            self.queued_next = None;
+                            self.prefetch_rx = None;
+                            self.prefetch_tried = None;
+                            self.played_something = false;
+                            self.loading_since = Some(Instant::now());
+                        }
+                    }
+                }
+            }
+        }
+        let Some(issued) = self.stream_issued else { return };
+        let active = matches!(self.state.playback, PlaybackStatus::Playing | PlaybackStatus::Paused);
+        if !active || self.refresh_rx.is_some() || !prefetch::stream_is_stale(issued.elapsed()) {
+            return;
+        }
+        if self.refresh_backoff.is_some_and(|at| at.elapsed() < Duration::from_secs(60)) {
+            return;
+        }
+        let Some(track) = self.state.current_track().cloned() else { return };
+        self.refresh_backoff = Some(Instant::now());
+        self.refresh_rx = self.resolve_in_background(&track).map(|rx| (track.id, rx));
+    }
+
+    // ---- Media keys and desktop widgets (MPRIS) ---------------------------------------------
+
+    fn poll_media(&mut self) {
+        while let Ok(event) = self.media_rx.try_recv() {
+            match event {
+                MediaControlEvent::Play => {
+                    if self.state.playback == PlaybackStatus::Paused {
+                        self.toggle_pause();
+                    }
+                }
+                MediaControlEvent::Pause | MediaControlEvent::Stop => {
+                    if self.state.playback == PlaybackStatus::Playing {
+                        self.toggle_pause();
+                    }
+                }
+                MediaControlEvent::Toggle => self.toggle_pause(),
+                MediaControlEvent::Next => self.skip(true),
+                MediaControlEvent::Previous => self.skip(false),
+                MediaControlEvent::SetPosition(MediaPosition(position)) => self.seek_to(position.as_secs_f64()),
+                _ => {}
+            }
+        }
+        // Tell the desktop about the current track and state, only when they change.
+        let key = (self.state.current_track, self.state.playback);
+        if self.media_synced != Some(key) {
+            self.media_synced = Some(key);
+            if let Some(media) = self.media.as_mut() {
+                media.update(self.state.current_track(), self.state.playback, self.position);
+            }
+        }
+    }
+
+    // ---- Tray ----------------------------------------------------------------------------
+
+    /// Starts or stops the tray icon to match the setting. If the desktop has no tray, says so
+    /// and turns the setting off again.
+    pub fn apply_tray(&mut self) {
+        if self.settings.tray {
+            if self.tray.is_some() {
+                return;
+            }
+            let tx = self.tray_tx.clone();
+            match TrayHandle::spawn(tx, || {}) {
+                Ok(handle) => {
+                    self.tray = Some(handle);
+                    self.tray_synced = None;
+                }
+                Err(message) => {
+                    self.notify(message);
+                    self.update_settings(|settings| settings.tray = false);
+                }
+            }
+        } else if let Some(handle) = self.tray.take() {
+            handle.shutdown();
+        }
+    }
+
+    /// True while a tray icon is running, so closing the window should only hide it.
+    pub fn tray_active(&self) -> bool {
+        self.tray.is_some()
+    }
+
+    fn poll_tray(&mut self) {
+        while let Ok(command) = self.tray_rx.try_recv() {
+            match command {
+                TrayCommand::Show => self.actions.push(Action::ShowWindow),
+                TrayCommand::PlayPause => self.toggle_pause(),
+                TrayCommand::Next => self.skip(true),
+                TrayCommand::Previous => self.skip(false),
+                TrayCommand::Quit => self.actions.push(Action::Quit),
+            }
+        }
+        // Keep the tray's play/pause label and tooltip in step with playback.
+        let key = (self.state.current_track, self.state.playback);
+        if self.tray_synced != Some(key) {
+            if let Some(tray) = self.tray.as_ref() {
+                self.tray_synced = Some(key);
+                let name = self.state.current_track().map(|track| format!("{} - {}", track.title, track.artist)).unwrap_or_default();
+                tray.update(self.state.playback == PlaybackStatus::Playing, &name);
+            }
+        }
+    }
+
+    /// Requests from the engine to the window since the last call.
+    pub fn take_actions(&mut self) -> Vec<Action> {
+        std::mem::take(&mut self.actions)
+    }
+
+    // ---- Dynamic colour --------------------------------------------------------------------
+
+    /// Follows the current song's artwork: fetches its dominant hue when the song changes, then
+    /// eases the colours towards the matching scheme. `dt` is the time since the last call, in
+    /// seconds. Returns the dark colour scheme to draw with when it changed.
+    pub fn update_colors(&mut self, dt: f32) -> Option<ColorScheme> {
+        let wanted = if self.settings.dynamic_color {
+            self.state.current_track().and_then(|track| track.thumbnail_url.clone())
+        } else {
+            None
+        };
+        if wanted != self.art_url {
+            self.art_url = wanted.clone();
+            self.art_rx = None;
+            match wanted {
+                Some(url) => {
+                    let (tx, rx) = mpsc::channel();
+                    thread::spawn(move || {
+                        let hue = dynamic_color::hue_from_url(&url);
+                        let _ = tx.send((url, hue));
+                    });
+                    self.art_rx = Some(rx);
+                }
+                None => self.scheme.retarget(None),
+            }
+        }
+        if let Some(Ok((url, hue))) = self.art_rx.as_ref().map(|rx| rx.try_recv()) {
+            self.art_rx = None;
+            // Ignore a late answer for a song that is no longer playing.
+            if self.art_url.as_deref() == Some(url.as_str()) {
+                self.scheme.retarget(hue);
+            }
+        }
+        let changed = self.scheme.step(dt) || self.scheme_changed;
+        self.scheme_changed = false;
+        changed.then(|| self.scheme.current().1)
+    }
+
+    /// Stops the tray icon and playback. Call once when the app quits.
+    pub fn shutdown(&mut self) {
+        if let Some(handle) = self.tray.take() {
+            handle.shutdown();
+        }
+        self.mpv = None;
+    }
+
+    /// Forces the next `update_colors` to return the scheme (used once at start-up).
+    pub fn request_colors(&mut self) {
+        self.scheme_changed = true;
     }
 }
 
