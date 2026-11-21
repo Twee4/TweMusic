@@ -23,8 +23,7 @@ Cargo workspace
 │                                          ids.rs: video IDs, thumbnail host allow-list
 ├── crates/player      (MPV JSON IPC wrapper)
 ├── src/               the engine: library, search, today's pick, playback, tray, notifications, MPRIS, colours
-├── crates/slint_app   the window (Slint): Home, Library, Settings, Search, player
-└── src-tauri/         optional webview experiment (needs WebKitGTK; not built by default)
+└── crates/slint_app   the window (Slint): Home, Library, Settings, Search, player
 ```
 
 If a client profile stops working, edit `~/.config/twe_music/clients.json` (same format as
@@ -47,13 +46,6 @@ sudo pacman -S mpv    # Arch Linux
 ```
 
 Searching and streaming need an internet connection.
-
-The optional webview app is built separately and needs WebKitGTK system libraries
-(for Debian/Ubuntu: `libwebkit2gtk-4.1-dev`, `libgtk-3-dev`, `libsoup-3.0-dev`):
-
-```bash
-cargo run -p twe_music_tauri
-```
 
 ## Development stages
 
