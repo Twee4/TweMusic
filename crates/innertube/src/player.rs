@@ -45,7 +45,7 @@ pub fn wait_until_playable(stream: &Stream) {
             .send()
             .map(|response| response.status().as_u16());
         match answer {
-            Ok(status) if still_warming_up(status) && Instant::now() < deadline => std::thread::sleep(Duration::from_millis(1000)),
+            Ok(status) if still_warming_up(status) && Instant::now() < deadline => std::thread::sleep(Duration::from_millis(250)),
             _ => return,
         }
     }

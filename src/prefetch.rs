@@ -1,20 +1,16 @@
-//! When to look up the next track's stream (so it can follow without a gap) and when the
+//! When to look up the next track's stream (so it can follow without a gap or a wait) and when the
 //! current track's stream is old enough that YouTube's URL may stop working.
 
 use std::time::Duration;
 
-/// Start resolving the next track this long before the current one ends. Fresh stream addresses
-/// are refused for a few seconds, so this must leave room for that wait.
-pub const PREFETCH_LEAD: f64 = 30.0;
-/// Never prefetch for tracks shorter than this: the whole track is the lead time.
-const MIN_DURATION: f64 = 20.0;
 /// YouTube stream URLs last about six hours; refresh with an hour to spare.
 pub const STREAM_MAX_AGE: Duration = Duration::from_secs(5 * 60 * 60);
 
-/// True once the track is within `PREFETCH_LEAD` seconds of its end.
+/// True once the track is playing and its length is known. The next track is looked up right
+/// away (not just before the end) so the Next button can switch to it at once; the address stays
+/// valid for hours.
 pub fn should_prefetch(position: Option<f64>, duration: Option<f64>) -> bool {
-    let (Some(position), Some(duration)) = (position, duration) else { return false };
-    duration >= MIN_DURATION && position > 0.0 && duration - position <= PREFETCH_LEAD
+    position.is_some_and(|position| position > 0.0) && duration.is_some_and(|duration| duration > 0.0)
 }
 
 /// True when a stream issued `age` ago should be looked up again.
@@ -27,16 +23,13 @@ mod tests {
     use super::*;
 
     #[test]
-    fn prefetches_only_near_the_end_of_a_known_track() {
+    fn prefetches_as_soon_as_the_track_is_playing() {
         assert!(!should_prefetch(None, Some(200.0)));
         assert!(!should_prefetch(Some(10.0), None));
-        assert!(!should_prefetch(Some(10.0), Some(200.0)));
-        assert!(should_prefetch(Some(186.0), Some(200.0)));
-        assert!(should_prefetch(Some(199.5), Some(200.0)));
-        // A very short clip is not worth a prefetch.
-        assert!(!should_prefetch(Some(5.0), Some(12.0)));
         // A position of 0 means the track has not really started.
-        assert!(!should_prefetch(Some(0.0), Some(20.0)));
+        assert!(!should_prefetch(Some(0.0), Some(200.0)));
+        assert!(should_prefetch(Some(1.0), Some(200.0)));
+        assert!(should_prefetch(Some(199.5), Some(200.0)));
     }
 
     #[test]
