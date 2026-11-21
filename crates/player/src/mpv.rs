@@ -131,6 +131,11 @@ impl MpvPlayer {
         self.get_property("playlist-pos").ok()?.as_i64()
     }
 
+    /// Jumps to the queued stream now (the Next button), instead of waiting for the track to end.
+    pub fn advance_to_queued(&mut self) -> Result<(), MpvError> {
+        self.command(json!(["playlist-next", "force"])).map(|_| ())
+    }
+
     /// Removes the finished first entry once a queued stream has taken over.
     pub fn drop_finished_entry(&mut self) {
         let _ = self.command(json!(["playlist-remove", 0]));

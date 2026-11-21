@@ -332,6 +332,14 @@ impl Engine {
 
     pub fn skip(&mut self, forward: bool) {
         let Some(id) = self.state.adjacent_remote(forward) else { return };
+        // The next track is usually looked up and queued in mpv already: switch to it at once.
+        if forward && self.state.playback == PlaybackStatus::Playing && self.queued_next.is_some_and(|(queued, _)| queued == id) {
+            let jumped = self.mpv.as_mut().is_some_and(|player| player.advance_to_queued().is_ok());
+            if jumped {
+                self.finish_advance(id);
+                return;
+            }
+        }
         if let Some(track) = self.state.tracks.iter().find(|track| track.id == id).cloned() {
             self.play_remote(&track);
         }
