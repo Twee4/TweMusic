@@ -66,8 +66,9 @@ component RailItem inherits Rectangle {
             Rectangle {
                 width: 56px;
                 height: 32px;
-                border-radius: 16px;
-                background: root.selected ? Palette.accent : (ta.has-hover ? Palette.glass : #00000000);
+                border-radius: ta.pressed ? 10px : 16px;
+                animate border-radius { duration: 320ms; easing: cubic-bezier(0.34, 1.56, 0.64, 1); }
+                background: root.selected ? Palette.accent : (ta.pressed ? Palette.glass-hover : (ta.has-hover ? Palette.glass : #00000000));
                 animate background { duration: 150ms; easing: ease-out; }
                 Icon {
                     glyph: root.glyph;
@@ -111,12 +112,15 @@ component RoundButton inherits Rectangle {
     in property <length> icon-size: 24px;
     in property <color> fill: Palette.glass-hover;
     in property <color> ink: #e8e0f0;
+    // Corner radius at rest; it squeezes while pressed and springs back (Material 3 Expressive).
+    in property <length> rest-radius: diameter / 2;
     callback clicked();
     width: diameter;
     height: diameter;
-    border-radius: diameter / 2;
-    background: ta.has-hover ? fill.brighter(0.2) : fill;
-    animate background { duration: 120ms; }
+    border-radius: ta.pressed ? min(root.rest-radius, root.diameter * 0.28) : root.rest-radius;
+    animate border-radius { duration: 320ms; easing: cubic-bezier(0.34, 1.56, 0.64, 1); }
+    background: ta.pressed ? fill.brighter(0.4) : (ta.has-hover ? fill.brighter(0.2) : fill);
+    animate background { duration: 100ms; }
     Icon {
         glyph: root.glyph;
         size: root.icon-size;
@@ -134,6 +138,11 @@ component QuickCard inherits Rectangle {
     border-radius: 12px;
     background: ta.has-hover ? Palette.glass-hover : Palette.glass;
     animate background { duration: 120ms; }
+    Rectangle {
+        border-radius: root.border-radius;
+        background: ta.pressed ? #ffffff1f : #00000000;
+        animate background { duration: 80ms; }
+    }
     HorizontalLayout {
         spacing: 12px;
         Art {
@@ -161,6 +170,8 @@ component ShelfCard inherits Rectangle {
     callback clicked();
     width: 156px;
     height: 220px;
+    opacity: ta.pressed ? 0.82 : 1.0;
+    animate opacity { duration: 120ms; }
     VerticalLayout {
         spacing: 6px;
         Art {
@@ -182,7 +193,7 @@ component ShelfCard inherits Rectangle {
             color: Palette.on-surface-variant;
         }
     }
-    TouchArea {
+    ta := TouchArea {
         clicked => { root.clicked(); }
     }
 }
@@ -318,11 +329,17 @@ component TextButton inherits Rectangle {
     in property <bool> enabled: true;
     callback clicked();
     height: 40px;
-    border-radius: 20px;
-    opacity: root.enabled ? 1.0 : 0.4;
+    border-radius: ta.pressed ? 12px : 20px;
+    animate border-radius { duration: 320ms; easing: cubic-bezier(0.34, 1.56, 0.64, 1); }
+    opacity: root.enabled ? 1.0 : 0.38;
     background: root.destructive ? (ta.has-hover ? #8c3a4a : #7a2f3f)
         : (root.filled ? (ta.has-hover ? Palette.accent.brighter(0.25) : Palette.accent) : (ta.has-hover ? Palette.glass-hover : Palette.glass));
     animate background { duration: 120ms; }
+    Rectangle {
+        border-radius: root.border-radius;
+        background: ta.pressed ? #ffffff1f : #00000000;
+        animate background { duration: 80ms; }
+    }
     HorizontalLayout {
         padding-left: 20px;
         padding-right: 20px;
@@ -345,9 +362,15 @@ component Chip inherits Rectangle {
     in property <bool> selected;
     callback clicked();
     height: 36px;
-    border-radius: 18px;
+    border-radius: ta.pressed ? 10px : 18px;
+    animate border-radius { duration: 320ms; easing: cubic-bezier(0.34, 1.56, 0.64, 1); }
     background: root.selected ? Palette.accent : (ta.has-hover ? Palette.glass-hover : Palette.glass);
     animate background { duration: 150ms; easing: ease-out; }
+    Rectangle {
+        border-radius: root.border-radius;
+        background: ta.pressed ? #ffffff1f : #00000000;
+        animate background { duration: 80ms; }
+    }
     HorizontalLayout {
         padding-left: 16px;
         padding-right: 16px;
@@ -409,6 +432,11 @@ component TrackRow inherits Rectangle {
     border-radius: 14px;
     background: ta.has-hover ? Palette.glass : #00000000;
     animate background { duration: 120ms; }
+    Rectangle {
+        border-radius: root.border-radius;
+        background: ta.pressed ? #ffffff1f : #00000000;
+        animate background { duration: 80ms; }
+    }
     ta := TouchArea {
         clicked => { root.clicked(); }
     }
@@ -987,6 +1015,7 @@ export component AppWindow inherits Window {
                         RoundButton {
                             glyph: root.playing ? "M6 19h4V5H6v14zm8-14v14h4V5h-4z" : "M8 5v14l11-7z";
                             diameter: 48px;
+                            rest-radius: root.playing ? 16px : 24px;
                             fill: Palette.accent;
                             ink: #ffffff;
                             clicked => { root.toggle-pause(); }
