@@ -17,10 +17,8 @@ twe_innertube = { path = "crates/innertube" }
 twe_player = { path = "crates/player" }
 
 [workspace]
-members = ["crates/innertube", "crates/player", "crates/slint_app", "src-tauri"]
+members = ["crates/innertube", "crates/player", "crates/slint_app"]
 # Plain `cargo build` / `cargo test` / `cargo run` cover the Slint app and the crates it uses.
-# The Tauri crate needs the WebKitGTK system libraries; build it explicitly with
-# `cargo build -p twe_music_tauri`.
 default-members = [".", "crates/innertube", "crates/player", "crates/slint_app"]
 
 [profile.dev]
