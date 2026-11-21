@@ -2,7 +2,7 @@
 name = "twe_slint"
 version = "0.1.0"
 edition = "2021"
-description = "TweMusic with a Slint interface (work in progress; the egui app is still the main one)"
+description = "TweMusic: a native Linux music player with a Slint interface"
 license = "MIT"
 
 [dependencies]

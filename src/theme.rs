@@ -1,15 +1,28 @@
-//! Material 3 design tokens: colour roles (light and dark), shape scale, type scale,
-//! state layers, window size classes, and the egui style that applies them.
-//!
-//! Colours are the Material 3 baseline scheme (seed #6750A4). Every "on-X" role is meant
-//! to be drawn on its "X" role; the tests below check that these pairs stay readable.
+//! Colour roles for the interface (Material 3 baseline scheme, seed #6750A4, light and dark),
+//! the album-art schemes that replace them, and the spring maths used to fade between them.
+//! Every "on-X" role is meant to be drawn on its "X" role; the tests check that these pairs stay
+//! readable.
 
-use std::{path::PathBuf, sync::RwLock};
+use std::sync::RwLock;
 
-use eframe::egui::{
-    self, Color32, Context, FontId, RichText, Rounding, Shadow, Stroke, Style, TextStyle, Theme,
-    ThemePreference, Visuals, vec2,
-};
+/// An opaque sRGB colour.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Color32([u8; 3]);
+
+impl Color32 {
+    pub const fn from_rgb(r: u8, g: u8, b: u8) -> Self {
+        Self([r, g, b])
+    }
+    pub const fn r(self) -> u8 {
+        self.0[0]
+    }
+    pub const fn g(self) -> u8 {
+        self.0[1]
+    }
+    pub const fn b(self) -> u8 {
+        self.0[2]
+    }
+}
 
 const fn hex(rgb: u32) -> Color32 {
     Color32::from_rgb((rgb >> 16) as u8, (rgb >> 8) as u8, rgb as u8)
@@ -119,7 +132,6 @@ pub const LIGHT: ColorScheme = ColorScheme {
 static DYNAMIC: RwLock<Option<(ColorScheme, ColorScheme)>> = RwLock::new(None);
 
 /// Replaces the baseline schemes with `pair` (light, dark), or restores them with `None`.
-/// Call `apply` afterwards so egui's own widgets pick the colours up too.
 pub fn set_dynamic(pair: Option<(ColorScheme, ColorScheme)>) {
     if let Ok(mut slot) = DYNAMIC.write() {
         *slot = pair;
@@ -135,16 +147,6 @@ pub fn colors_for(dark: bool) -> ColorScheme {
         (None, true) => DARK,
         (None, false) => LIGHT,
     }
-}
-
-/// The colour scheme for the theme `ui` is currently drawn in.
-pub fn colors(ui: &egui::Ui) -> ColorScheme {
-    colors_for(ui.visuals().dark_mode)
-}
-
-/// Same, for code that only has the context.
-pub fn colors_ctx(ctx: &Context) -> ColorScheme {
-    colors_for(ctx.style().visuals.dark_mode)
 }
 
 impl ColorScheme {
@@ -169,45 +171,10 @@ impl ColorScheme {
     }
 }
 
-/// A translucent copy of `color`, used for state layers drawn on top of a container.
-pub fn with_alpha(color: Color32, alpha: f32) -> Color32 {
-    let a = (alpha.clamp(0.0, 1.0) * 255.0).round() as u8;
-    Color32::from_rgba_unmultiplied(color.r(), color.g(), color.b(), a)
-}
-
 /// `over` painted at `alpha` on top of an opaque `base`.
 pub fn blend(base: Color32, over: Color32, alpha: f32) -> Color32 {
     let mix = |b: u8, o: u8| (f32::from(b) * (1.0 - alpha) + f32::from(o) * alpha).round() as u8;
     Color32::from_rgb(mix(base.r(), over.r()), mix(base.g(), over.g()), mix(base.b(), over.b()))
-}
-
-/// Material 3 state layer opacities.
-pub mod state {
-    pub const HOVER: f32 = 0.08;
-    pub const FOCUS: f32 = 0.10;
-    pub const PRESSED: f32 = 0.10;
-    pub const DISABLED_CONTAINER: f32 = 0.12;
-    pub const DISABLED_CONTENT: f32 = 0.38;
-}
-
-/// Material 3 corner radius scale (in dp).
-pub mod shape {
-    use eframe::egui::Rounding;
-
-    pub const EXTRA_SMALL: f32 = 4.0;
-    pub const SMALL: f32 = 8.0;
-    pub const MEDIUM: f32 = 12.0;
-    pub const LARGE: f32 = 16.0;
-    pub const EXTRA_LARGE: f32 = 28.0;
-    // Material 3 Expressive additions.
-    pub const LARGE_INCREASED: f32 = 20.0;
-    pub const EXTRA_LARGE_INCREASED: f32 = 32.0;
-    pub const EXTRA_EXTRA_LARGE: f32 = 48.0;
-
-    /// Fully rounded ("stadium") corners. egui clamps this to half the shorter side.
-    pub fn full() -> Rounding {
-        Rounding::same(1000.0)
-    }
 }
 
 /// Material 3 Expressive motion: components move on springs instead of fixed-time curves,
@@ -283,215 +250,6 @@ pub mod motion {
     }
 }
 
-/// Material 3 type scale roles.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Role {
-    DisplayLarge,
-    DisplayMedium,
-    DisplaySmall,
-    HeadlineLarge,
-    HeadlineMedium,
-    HeadlineSmall,
-    TitleLarge,
-    TitleMedium,
-    TitleSmall,
-    BodyLarge,
-    BodyMedium,
-    BodySmall,
-    LabelLarge,
-    LabelMedium,
-    LabelSmall,
-}
-
-impl Role {
-    pub const fn size(self) -> f32 {
-        match self {
-            Self::DisplayLarge => 57.0,
-            Self::DisplayMedium => 45.0,
-            Self::DisplaySmall => 36.0,
-            Self::HeadlineLarge => 32.0,
-            Self::HeadlineMedium => 28.0,
-            Self::HeadlineSmall => 24.0,
-            Self::TitleLarge => 22.0,
-            Self::TitleMedium => 16.0,
-            Self::TitleSmall => 14.0,
-            Self::BodyLarge => 16.0,
-            Self::BodyMedium => 14.0,
-            Self::LabelLarge => 14.0,
-            Self::BodySmall | Self::LabelMedium => 12.0,
-            Self::LabelSmall => 11.0,
-        }
-    }
-
-    pub fn font(self) -> FontId {
-        FontId::proportional(self.size())
-    }
-}
-
-/// Text in a type scale role. Colour defaults to the theme's text colour.
-pub fn text(role: Role, content: impl Into<String>) -> RichText {
-    RichText::new(content).size(role.size())
-}
-
-/// Material 3 window size classes by width in dp.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum WindowSize {
-    Compact,
-    Medium,
-    Expanded,
-}
-
-impl WindowSize {
-    pub fn from_width(width: f32) -> Self {
-        if width < 600.0 {
-            Self::Compact
-        } else if width < 840.0 {
-            Self::Medium
-        } else {
-            Self::Expanded
-        }
-    }
-
-    /// Page side margin: 20dp on compact windows, 32dp otherwise.
-    pub fn margin(self) -> f32 {
-        if self == Self::Compact { 20.0 } else { 32.0 }
-    }
-}
-
-/// Installs the Material 3 styles for both the light and the dark theme.
-/// Which one is shown follows the theme preference (system by default).
-pub fn apply(ctx: &Context) {
-    for (theme, dark) in [(Theme::Dark, true), (Theme::Light, false)] {
-        ctx.style_mut_of(theme, |style| configure(style, dark));
-    }
-}
-
-fn configure(style: &mut Style, dark: bool) {
-    let c = colors_for(dark);
-    style.visuals = visuals(&c, dark);
-    style.spacing.item_spacing = vec2(8.0, 8.0);
-    style.spacing.button_padding = vec2(16.0, 8.0);
-    style.spacing.interact_size = vec2(40.0, 40.0);
-    style.animation_time = 0.2;
-    style.text_styles = [
-        (TextStyle::Small, Role::BodySmall.font()),
-        (TextStyle::Body, Role::BodyMedium.font()),
-        (TextStyle::Button, Role::LabelLarge.font()),
-        (TextStyle::Heading, Role::HeadlineSmall.font()),
-        (TextStyle::Monospace, FontId::monospace(14.0)),
-    ]
-    .into();
-}
-
-fn visuals(c: &ColorScheme, dark: bool) -> Visuals {
-    let mut v = if dark { Visuals::dark() } else { Visuals::light() };
-    let corner = Rounding::same(shape::SMALL);
-
-    v.panel_fill = c.surface;
-    v.window_fill = c.surface_container_high;
-    v.window_stroke = Stroke::NONE;
-    v.window_rounding = Rounding::same(shape::EXTRA_LARGE);
-    v.menu_rounding = Rounding::same(shape::EXTRA_SMALL);
-    let shadow = Shadow {
-        offset: vec2(0.0, 2.0),
-        blur: 8.0,
-        spread: 0.0,
-        color: Color32::from_black_alpha(if dark { 110 } else { 50 }),
-    };
-    v.window_shadow = shadow;
-    v.popup_shadow = shadow;
-    v.extreme_bg_color = c.surface_container_highest;
-    v.faint_bg_color = c.surface_container_low;
-    v.code_bg_color = c.surface_container_high;
-    v.hyperlink_color = c.primary;
-    v.error_fg_color = c.error;
-    v.slider_trailing_fill = true;
-    v.selection.bg_fill = c.primary_container;
-    v.selection.stroke = Stroke::new(1.0_f32, c.primary);
-    v.text_cursor.stroke = Stroke::new(2.0_f32, c.primary);
-
-    // Text and frames.
-    v.widgets.noninteractive.bg_fill = c.surface;
-    v.widgets.noninteractive.weak_bg_fill = c.surface;
-    v.widgets.noninteractive.bg_stroke = Stroke::new(1.0_f32, c.outline_variant);
-    v.widgets.noninteractive.fg_stroke = Stroke::new(1.0_f32, c.on_surface);
-    v.widgets.noninteractive.rounding = corner;
-
-    // Buttons and fields at rest: transparent, with the Material state layers on top.
-    v.widgets.inactive.bg_fill = c.surface_container_highest;
-    v.widgets.inactive.weak_bg_fill = Color32::TRANSPARENT;
-    v.widgets.inactive.bg_stroke = Stroke::NONE;
-    v.widgets.inactive.fg_stroke = Stroke::new(1.0_f32, c.on_surface);
-    v.widgets.inactive.rounding = corner;
-    v.widgets.inactive.expansion = 0.0;
-
-    let hover_weak = blend(c.surface, c.on_surface, state::HOVER);
-    v.widgets.hovered.bg_fill = blend(c.surface_container_highest, c.on_surface, state::HOVER);
-    v.widgets.hovered.weak_bg_fill = hover_weak;
-    v.widgets.hovered.bg_stroke = Stroke::NONE;
-    v.widgets.hovered.fg_stroke = Stroke::new(1.0_f32, c.on_surface);
-    v.widgets.hovered.rounding = corner;
-    v.widgets.hovered.expansion = 0.0;
-
-    let pressed_weak = blend(c.surface, c.on_surface, state::PRESSED);
-    v.widgets.active.bg_fill = blend(c.surface_container_highest, c.on_surface, state::PRESSED);
-    v.widgets.active.weak_bg_fill = pressed_weak;
-    v.widgets.active.bg_stroke = Stroke::NONE;
-    v.widgets.active.fg_stroke = Stroke::new(1.0_f32, c.on_surface);
-    v.widgets.active.rounding = corner;
-    v.widgets.active.expansion = 0.0;
-
-    v.widgets.open = v.widgets.active;
-    v
-}
-
-// ---- Theme preference persistence -------------------------------------------------
-
-pub fn preference_to_str(preference: ThemePreference) -> &'static str {
-    match preference {
-        ThemePreference::System => "system",
-        ThemePreference::Light => "light",
-        ThemePreference::Dark => "dark",
-    }
-}
-
-pub fn preference_from_str(value: &str) -> ThemePreference {
-    match value.trim() {
-        "light" => ThemePreference::Light,
-        "dark" => ThemePreference::Dark,
-        _ => ThemePreference::System,
-    }
-}
-
-/// The next preference in the System -> Light -> Dark cycle.
-pub fn next_preference(preference: ThemePreference) -> ThemePreference {
-    match preference {
-        ThemePreference::System => ThemePreference::Light,
-        ThemePreference::Light => ThemePreference::Dark,
-        ThemePreference::Dark => ThemePreference::System,
-    }
-}
-
-fn preference_path() -> Option<PathBuf> {
-    Some(crate::library::default_path()?.with_file_name("theme.txt"))
-}
-
-pub fn load_preference() -> ThemePreference {
-    preference_path()
-        .and_then(|path| std::fs::read_to_string(path).ok())
-        .map(|text| preference_from_str(&text))
-        .unwrap_or(ThemePreference::System)
-}
-
-pub fn save_preference(preference: ThemePreference) {
-    if let Some(path) = preference_path() {
-        if let Some(parent) = path.parent() {
-            let _ = std::fs::create_dir_all(parent);
-        }
-        let _ = std::fs::write(path, preference_to_str(preference));
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -543,46 +301,15 @@ mod tests {
         }
     }
 
-    #[test]
-    fn window_size_classes_use_material_breakpoints() {
-        assert_eq!(WindowSize::from_width(360.0), WindowSize::Compact);
-        assert_eq!(WindowSize::from_width(599.9), WindowSize::Compact);
-        assert_eq!(WindowSize::from_width(600.0), WindowSize::Medium);
-        assert_eq!(WindowSize::from_width(839.9), WindowSize::Medium);
-        assert_eq!(WindowSize::from_width(840.0), WindowSize::Expanded);
-        assert_eq!(WindowSize::Compact.margin(), 20.0);
-        assert_eq!(WindowSize::Expanded.margin(), 32.0);
-    }
 
     #[test]
-    fn blend_and_alpha_behave() {
+    fn blend_mixes_colours() {
         let base = Color32::from_rgb(0, 0, 0);
         let over = Color32::from_rgb(200, 100, 50);
         assert_eq!(blend(base, over, 0.0), base);
         assert_eq!(blend(base, over, 1.0), over);
         assert_eq!(blend(base, over, 0.5), Color32::from_rgb(100, 50, 25));
-        assert_eq!(with_alpha(over, 0.0).a(), 0);
-        assert_eq!(with_alpha(over, 1.0).a(), 255);
     }
 
-    #[test]
-    fn theme_preference_round_trips_and_cycles() {
-        for preference in [ThemePreference::System, ThemePreference::Light, ThemePreference::Dark] {
-            assert_eq!(preference_from_str(preference_to_str(preference)), preference);
-        }
-        assert_eq!(preference_from_str("garbage"), ThemePreference::System);
-        assert_eq!(next_preference(ThemePreference::System), ThemePreference::Light);
-        assert_eq!(next_preference(ThemePreference::Light), ThemePreference::Dark);
-        assert_eq!(next_preference(ThemePreference::Dark), ThemePreference::System);
-    }
 
-    #[test]
-    fn type_scale_matches_material_sizes() {
-        assert_eq!(Role::DisplayLarge.size(), 57.0);
-        assert_eq!(Role::HeadlineMedium.size(), 28.0);
-        assert_eq!(Role::TitleLarge.size(), 22.0);
-        assert_eq!(Role::BodyLarge.size(), 16.0);
-        assert_eq!(Role::BodyMedium.size(), 14.0);
-        assert_eq!(Role::LabelSmall.size(), 11.0);
-    }
 }

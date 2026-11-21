@@ -2,12 +2,10 @@
 name = "twe_music"
 version = "0.1.0"
 edition = "2021"
-description = "A native Linux music player built in Rust with a Material 3-inspired interface"
+description = "TweMusic engine: library, search, playback, tray, notifications and colours (the Slint app draws it)"
 license = "MIT"
 
 [dependencies]
-eframe = "0.29"
-egui_extras = { version = "0.29", features = ["http", "image"] }
 ksni = { version = "0.3", default-features = false, features = ["async-io", "blocking"] }
 image = { version = "0.25", default-features = false, features = ["jpeg", "png", "webp"] }
 notify-rust = { version = "4", default-features = false, features = ["z"] }
@@ -21,11 +19,10 @@ twe_player = { path = "crates/player" }
 
 [workspace]
 members = ["crates/innertube", "crates/player", "crates/slint_app", "src-tauri"]
-# Plain `cargo build` / `cargo test` (and CI) cover the egui app and the pure-Rust crates in
-# crates/ (twe_innertube, twe_player). They don't need the WebKitGTK system libraries that the
-# Tauri crate requires; build the webview app explicitly with `cargo build -p twe_music_tauri`.
-# The Slint front end is also built on request: `cargo run --release -p twe_slint`.
-default-members = [".", "crates/innertube", "crates/player"]
+# Plain `cargo build` / `cargo test` / `cargo run` cover the Slint app and the crates it uses.
+# The Tauri crate needs the WebKitGTK system libraries; build it explicitly with
+# `cargo build -p twe_music_tauri`.
+default-members = [".", "crates/innertube", "crates/player", "crates/slint_app"]
 
 [profile.dev]
 opt-level = 0

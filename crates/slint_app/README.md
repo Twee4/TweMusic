@@ -1,15 +1,11 @@
-# TweMusic, Slint front end (work in progress)
+# TweMusic, Slint app
 
-The same app logic as the egui version (`twe_music::engine`), drawn with Slint.
+The window of TweMusic. It only draws; `twe_music::engine` does the work (library, search, today's
+pick, playback, tray, notifications, media keys, dynamic colour).
 
 ```bash
-cargo run --release -p twe_slint
+cargo run --release
 ```
 
-Stages 2 and 3 of the move: Home with real data (history, liked songs, today's pick and similar songs,
-album art) and a working player (play/pause, previous/next, seek, like), plus Search (the box collapses when
-you tap outside it), the Library (playlists, import, remove, play all) and Settings (saved to
-settings.json), and (stage 4) media keys and desktop widgets (MPRIS), the tray icon (closing the
-window hides it while music keeps playing), track notifications while hidden, dynamic colour
-from the album art, gapless playback and stream refresh. The egui app
-(`cargo run --release`) is unchanged.
+(or `cargo run --release -p twe_slint`). The interface is in `ui/app.slint`; `src/main.rs` copies
+what the engine reports into the window.

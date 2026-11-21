@@ -22,7 +22,8 @@ Cargo workspace
 │                                          transport.rs: HTTP + headers   player.rs: stream lookup
 │                                          ids.rs: video IDs, thumbnail host allow-list
 ├── crates/player      (MPV JSON IPC wrapper)
-├── src/               the native egui app: Home, glass/Material 3 UI, library, tray, notifications, MPRIS
+├── src/               the engine: library, search, today's pick, playback, tray, notifications, MPRIS, colours
+├── crates/slint_app   the window (Slint): Home, Library, Settings, Search, player
 └── src-tauri/         optional webview experiment (needs WebKitGTK; not built by default)
 ```
 
