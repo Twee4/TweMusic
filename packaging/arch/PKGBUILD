@@ -19,7 +19,7 @@ _repo="$startdir/../.."
 build() {
   cd "$_repo"
   export CARGO_TARGET_DIR="$srcdir/target"
-  cargo build --release --locked -p twe_slint 2>/dev/null || cargo build --release -p twe_slint
+  cargo build --release -p twe_slint
 }
 
 package() {
