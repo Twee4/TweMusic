@@ -14,10 +14,13 @@ use std::{
     time::{Duration, Instant},
 };
 
-use slint::{Color, ComponentHandle, Image, ModelRc, Rgba8Pixel, SharedPixelBuffer, SharedString, Timer, TimerMode, VecModel};
+use slint::{
+    CloseRequestResponse, Color, ComponentHandle, Image, ModelRc, Rgba8Pixel, SharedPixelBuffer, SharedString, Timer, TimerMode, VecModel,
+};
 use twe_music::{
-    engine::{self, Engine},
+    engine::{self, Action, Engine},
     models::Track,
+    theme::ColorScheme,
     ytmusic,
 };
 
@@ -125,6 +128,26 @@ fn entries_of(tracks: &[Track], art: &mut Art, liked: impl Fn(&Track) -> bool) -
 /// A cheap fingerprint of a song list, to notice when it changed.
 fn fingerprint(tracks: &[Track]) -> u64 {
     tracks.iter().fold(tracks.len() as u64, |acc, track| acc.wrapping_mul(31).wrapping_add(track.id.0))
+}
+
+/// Turns one of the scheme's colours into a Slint colour.
+macro_rules! col {
+    ($color:expr) => {
+        Color::from_rgb_u8($color.r(), $color.g(), $color.b())
+    };
+}
+
+/// Gives the window the colours of `scheme` (they follow the album art of the current song).
+fn apply_palette(window: &AppWindow, scheme: &ColorScheme) {
+    let palette = window.global::<Palette>();
+    palette.set_background(col!(scheme.surface));
+    palette.set_accent(col!(scheme.primary_container));
+    palette.set_primary(col!(scheme.primary));
+    palette.set_on_primary(col!(scheme.on_primary));
+    palette.set_aurora_a(col!(scheme.primary_container));
+    palette.set_aurora_b(col!(scheme.tertiary_container));
+    palette.set_on_surface(col!(scheme.on_surface));
+    palette.set_on_surface_variant(col!(scheme.on_surface_variant));
 }
 
 fn clock(seconds: Option<f64>) -> SharedString {
@@ -348,13 +371,22 @@ fn main() -> Result<(), slint::PlatformError> {
     }
     {
         let engine = Rc::clone(&engine);
+        let weak = window.as_weak();
         window.on_settings_changed(move |name, value| {
-            engine.borrow_mut().update_settings(|settings| match name.as_str() {
+            let mut engine = engine.borrow_mut();
+            engine.update_settings(|settings| match name.as_str() {
                 "notifications" => settings.notifications = value,
                 "tray" => settings.tray = value,
                 "dynamic-color" => settings.dynamic_color = value,
                 _ => {}
             });
+            if name.as_str() == "tray" {
+                engine.apply_tray();
+                // If the desktop has no tray, the engine turned the setting back off.
+                if let Some(window) = weak.upgrade() {
+                    window.set_set_tray(engine.settings.tray);
+                }
+            }
         });
     }
     {
@@ -378,6 +410,17 @@ fn main() -> Result<(), slint::PlatformError> {
             engine.ensure_pick();
             engine.poll();
             engine.tick();
+            for action in engine.take_actions() {
+                match action {
+                    Action::ShowWindow => {
+                        let _ = window.show();
+                        engine.window_hidden = false;
+                    }
+                    Action::Quit => {
+                        let _ = slint::quit_event_loop();
+                    }
+                }
+            }
             if let Some(message) = engine.take_notices().pop() {
                 window.set_notice(message.into());
                 notice_until = Some(Instant::now() + NOTICE_TIME);
@@ -390,5 +433,43 @@ fn main() -> Result<(), slint::PlatformError> {
         });
     }
 
-    window.run()
+    // Colours ease towards the current song's artwork, so this timer runs faster.
+    let color_timer = Timer::default();
+    {
+        let weak = window.as_weak();
+        let engine = Rc::clone(&engine);
+        engine.borrow_mut().request_colors();
+        let mut last = Instant::now();
+        color_timer.start(TimerMode::Repeated, Duration::from_millis(33), move || {
+            let now = Instant::now();
+            let dt = now.duration_since(last).as_secs_f32();
+            last = now;
+            let Some(window) = weak.upgrade() else { return };
+            if let Some(scheme) = engine.borrow_mut().update_colors(dt) {
+                apply_palette(&window, &scheme);
+            }
+        });
+    }
+
+    // Closing the window hides it when the tray is on (music keeps playing); otherwise it quits.
+    {
+        let engine = Rc::clone(&engine);
+        window.window().on_close_requested(move || {
+            let mut engine = engine.borrow_mut();
+            if engine.tray_active() {
+                engine.window_hidden = true;
+            } else {
+                let _ = slint::quit_event_loop();
+            }
+            CloseRequestResponse::HideWindow
+        });
+    }
+
+    // The loop runs until `quit_event_loop`, so a hidden window (in the tray) keeps it alive.
+    window.show()?;
+    slint::run_event_loop_until_quit()?;
+    engine.borrow_mut().shutdown();
+    drop(timer);
+    drop(color_timer);
+    Ok(())
 }
