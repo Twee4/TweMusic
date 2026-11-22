@@ -684,6 +684,7 @@ export component AppWindow inherits Window {
     in property <bool> loading: false;
     in property <image> wave-image;
     in property <image> now-art-shaped;
+    in property <image> big-art;
     in property <image> play-shape;
     in property <image> loader-shape;
     in property <float> wave-extent: 0;
@@ -979,24 +980,75 @@ export component AppWindow inherits Window {
         }
         }
 
-        // Up next
-        if root.screen == 4 : VerticalLayout {
-            spacing: 8px;
-            Text {
-                text: root.up-next-rows.length > 0 ? "Up next" : "Nothing is queued yet. Play a song and similar ones will line up here.";
-                font-size: root.up-next-rows.length > 0 ? 20px : 14px;
-                font-weight: root.up-next-rows.length > 0 ? 700 : 400;
-                color: root.up-next-rows.length > 0 ? Palette.on-surface : Palette.on-surface-variant;
-                wrap: word-wrap;
-            }
+        // Now playing: the big artwork on the left, what is queued next on the right.
+        if root.screen == 4 : HorizontalLayout {
+            spacing: 16px;
             Rectangle {
-                vertical-stretch: 1;
+                horizontal-stretch: 1;
+                border-radius: 28px;
+                background: Palette.glass;
+                property <length> side: max(120px, min(self.height - 150px, self.width - 64px));
+                Image {
+                    visible: root.big-art.width > 0;
+                    source: root.big-art;
+                    width: parent.side;
+                    height: parent.side;
+                    x: (parent.width - self.width) / 2;
+                    y: 24px;
+                    image-fit: fill;
+                }
+                Art {
+                    visible: root.big-art.width == 0;
+                    tint: Palette.accent;
+                    source: root.now-art;
+                    border-radius: 40px;
+                    width: parent.side;
+                    height: parent.side;
+                    x: (parent.width - self.width) / 2;
+                    y: 24px;
+                }
+                Text {
+                    text: root.now-title;
+                    x: 24px;
+                    y: 24px + parent.side + 14px;
+                    width: parent.width - 48px;
+                    horizontal-alignment: center;
+                    overflow: elide;
+                    font-size: 22px;
+                    font-weight: 700;
+                    color: Palette.on-surface;
+                }
+                Text {
+                    text: root.now-artist;
+                    x: 24px;
+                    y: 24px + parent.side + 46px;
+                    width: parent.width - 48px;
+                    horizontal-alignment: center;
+                    overflow: elide;
+                    font-size: 15px;
+                    color: Palette.on-surface-variant;
+                }
+            }
+            if root.column-width > 760px : Rectangle {
+                width: clamp(300px, root.column-width * 0.32, 400px);
+                border-radius: 28px;
+                background: Palette.glass;
+                Text {
+                    x: 20px;
+                    y: 16px;
+                    text: root.up-next-rows.length > 0 ? "Up next" : "Nothing queued yet";
+                    font-size: 18px;
+                    font-weight: 700;
+                    color: Palette.on-surface;
+                }
                 Flickable {
-                    width: parent.width;
-                    height: parent.height;
-                    content-width: root.column-width;
+                    x: 8px;
+                    y: 56px;
+                    width: parent.width - 16px;
+                    height: parent.height - 64px;
+                    content-width: self.width;
                     VerticalLayout {
-                        width: root.column-width;
+                        width: parent.width;
                         alignment: start;
                         spacing: 2px;
                         padding-bottom: 12px;
@@ -1211,6 +1263,15 @@ export component AppWindow inherits Window {
             height: 128px;
             border-radius: 28px;
             background: Palette.glass;
+            // Tapping the artwork or title opens (and closes) the Now playing page.
+            TouchArea {
+                x: 0px;
+                y: 0px;
+                width: parent.width - 330px;
+                height: 88px;
+                mouse-cursor: pointer;
+                clicked => { root.toggle-up-next(); }
+            }
             VerticalLayout {
                 padding: 16px;
                 spacing: 6px;
@@ -1249,17 +1310,6 @@ export component AppWindow inherits Window {
                             overflow: elide;
                             font-size: 13px;
                             color: Palette.on-surface-variant;
-                        }
-                    }
-                    VerticalLayout {
-                        alignment: center;
-                        RoundButton {
-                            glyph: "M3 13h2v-2H3v2zm0 4h2v-2H3v2zm0-8h2V7H3v2zm4 4h14v-2H7v2zm0 4h14v-2H7v2zM7 7v2h14V7H7z";
-                            fill: root.screen == 4 ? Palette.accent : #00000000;
-                            ink: root.screen == 4 ? #ffffff : #e8e0f0;
-                            diameter: 40px;
-                            icon-size: 22px;
-                            clicked => { root.toggle-up-next(); }
                         }
                     }
                     VerticalLayout {
