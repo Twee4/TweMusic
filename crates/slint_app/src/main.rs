@@ -2,6 +2,8 @@
 //! work (library, search, today's pick, playback). A timer polls the engine and copies what
 //! changed into the window.
 
+mod shape;
+
 use std::{
     cell::RefCell,
     collections::{HashMap, HashSet},
@@ -464,6 +466,8 @@ fn main() -> Result<(), slint::PlatformError> {
         let engine = Rc::clone(&engine);
         engine.borrow_mut().request_colors();
         let mut last = Instant::now();
+        let mut shape_morph = shape::Morph::new();
+        let mut shape_time = 0.0_f32;
         let mut wave_phase = 0.0_f32;
         let mut wave_amplitude = 0.0_f32;
         color_timer.start(TimerMode::Repeated, Duration::from_millis(33), move || {
@@ -471,6 +475,24 @@ fn main() -> Result<(), slint::PlatformError> {
             let dt = now.duration_since(last).as_secs_f32();
             last = now;
             let Some(window) = weak.upgrade() else { return };
+            // The play button is a circle at rest, a cookie while playing and a cycling blob while
+            // a song loads; the outline springs from one to the next.
+            shape_time += dt;
+            let (loading, playing) = (window.get_loading(), window.get_playing());
+            let (target, spin) = if loading {
+                (shape::LOADER[(shape_time / 0.7) as usize % shape::LOADER.len()], 2.4)
+            } else if playing {
+                (shape::COOKIE_9, 0.5)
+            } else {
+                (shape::CIRCLE, 0.0)
+            };
+            let target = target.radii();
+            shape_morph.step(&target, dt, spin);
+            if loading || playing || !shape_morph.settled(&target) {
+                window.set_play_shape(shape_morph.path().into());
+            } else {
+                window.set_play_shape(SharedString::new());
+            }
             // The progress bar waves while a song plays and settles flat when it pauses.
             let target = if window.get_playing() { 1.0 } else { 0.0 };
             wave_amplitude += (target - wave_amplitude) * (1.0 - (-dt * 8.0).exp());
