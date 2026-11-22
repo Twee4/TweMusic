@@ -728,6 +728,7 @@ export component AppWindow inherits Window {
     in-out property <int> selected-playlist: 0;
     in property <string> playlist-title;
     in property <[Entry]> library-rows;
+    in property <[Entry]> up-next-rows;
     in-out property <string> new-playlist;
     in-out property <string> import-url;
     callback select-playlist(int);
@@ -737,6 +738,8 @@ export component AppWindow inherits Window {
     callback delete-playlist();
     callback remove-track(int);
     callback play-library(int);
+    callback play-up-next(int);
+    callback like-up-next(int);
 
     // Settings
     in-out property <bool> set-notifications: true;
@@ -754,6 +757,18 @@ export component AppWindow inherits Window {
         }
         root.search-open = true;
         search-field.focus-input();
+    }
+    // The Up next page (screen 4); the same button leaves it again.
+    function toggle-up-next() {
+        if (root.screen == 4) {
+            root.screen = root.return-screen;
+        } else {
+            if (root.screen != 3) {
+                root.return-screen = root.screen;
+            }
+            root.search-open = false;
+            root.screen = 4;
+        }
     }
     function close-search() {
         root.search-open = false;
@@ -962,6 +977,39 @@ export component AppWindow inherits Window {
                 }
             }
         }
+        }
+
+        // Up next
+        if root.screen == 4 : VerticalLayout {
+            spacing: 8px;
+            Text {
+                text: root.up-next-rows.length > 0 ? "Up next" : "Nothing is queued yet. Play a song and similar ones will line up here.";
+                font-size: root.up-next-rows.length > 0 ? 20px : 14px;
+                font-weight: root.up-next-rows.length > 0 ? 700 : 400;
+                color: root.up-next-rows.length > 0 ? Palette.on-surface : Palette.on-surface-variant;
+                wrap: word-wrap;
+            }
+            Rectangle {
+                vertical-stretch: 1;
+                Flickable {
+                    width: parent.width;
+                    height: parent.height;
+                    content-width: root.column-width;
+                    VerticalLayout {
+                        width: root.column-width;
+                        alignment: start;
+                        spacing: 2px;
+                        padding-bottom: 12px;
+                        for entry[i] in root.up-next-rows : TrackRow {
+                            entry: entry;
+                            action-glyph: entry.liked ? Glyphs.heart-filled : Glyphs.heart;
+                            action-active: entry.liked;
+                            clicked => { root.play-up-next(i); }
+                            action => { root.like-up-next(i); }
+                        }
+                    }
+                }
+            }
         }
 
         // Search results
@@ -1201,6 +1249,17 @@ export component AppWindow inherits Window {
                             overflow: elide;
                             font-size: 13px;
                             color: Palette.on-surface-variant;
+                        }
+                    }
+                    VerticalLayout {
+                        alignment: center;
+                        RoundButton {
+                            glyph: "M3 13h2v-2H3v2zm0 4h2v-2H3v2zm0-8h2V7H3v2zm4 4h14v-2H7v2zm0 4h14v-2H7v2zM7 7v2h14V7H7z";
+                            fill: root.screen == 4 ? Palette.accent : #00000000;
+                            ink: root.screen == 4 ? #ffffff : #e8e0f0;
+                            diameter: 40px;
+                            icon-size: 22px;
+                            clicked => { root.toggle-up-next(); }
                         }
                     }
                     VerticalLayout {

@@ -236,6 +236,19 @@ impl Engine {
         self.state.current_track()
     }
 
+    /// The songs queued after the current one, for the Up next page.
+    pub fn up_next_tracks(&self) -> Vec<Track> {
+        self.state.up_next(40)
+    }
+
+    /// Jumps to a song in the Up next list; the rest of the queue stays as it is.
+    pub fn play_up_next(&mut self, index: usize) {
+        if let Some(track) = self.up_next_tracks().get(index).cloned() {
+            self.state.play_track(track.id);
+            self.play_remote(&track);
+        }
+    }
+
     pub fn is_playing(&self) -> bool {
         self.state.playback == PlaybackStatus::Playing
     }

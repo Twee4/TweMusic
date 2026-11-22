@@ -222,6 +222,7 @@ struct ListKey {
     playlist: u64,
     selected_playlist: usize,
     playlist_names: u64,
+    up_next: u64,
 }
 
 /// Copies the engine's state into the window. Cheap values are set every time; the song lists
@@ -236,9 +237,10 @@ fn sync(window: &AppWindow, engine: &Engine, art: &mut Art, key: &mut ListKey, n
         pick: engine.pick.as_ref().map(|pick| (pick.day, pick.track.id.0)),
         art_version: art.version(),
         results: fingerprint(&engine.state.remote_results),
-        liked_marks: engine.state.remote_results.iter().filter(|track| engine.is_liked(track)).count(),
+        liked_marks: engine.state.remote_results.iter().chain(engine.up_next_tracks().iter()).filter(|track| engine.is_liked(track)).count(),
         playlist: fingerprint(&engine.playlist_tracks()),
         selected_playlist: engine.selected_playlist,
+        up_next: fingerprint(&engine.up_next_tracks()),
         playlist_names: engine.library.playlists.iter().fold(0u64, |acc, playlist| {
             acc.wrapping_mul(31).wrapping_add(playlist.name.len() as u64).wrapping_add(playlist.tracks.len() as u64 * 7)
         }),
@@ -261,6 +263,7 @@ fn sync(window: &AppWindow, engine: &Engine, art: &mut Art, key: &mut ListKey, n
         window.set_selected_playlist(engine.selected_playlist as i32);
         window.set_playlist_title(engine.library.playlists.get(engine.selected_playlist).map_or("", |playlist| playlist.name.as_str()).into());
         window.set_library_rows(entries_of(&engine.playlist_tracks(), art, |_| false));
+        window.set_up_next_rows(entries_of(&engine.up_next_tracks(), art, |track| engine.is_liked(track)));
         match &engine.pick {
             Some(pick) => {
                 window.set_pick(song_of(&pick.track, art));
@@ -417,6 +420,19 @@ fn main() -> Result<(), slint::PlatformError> {
     {
         let engine = Rc::clone(&engine);
         window.on_remove_track(move |index| engine.borrow_mut().remove_from_selected(index.max(0) as usize));
+    }
+    {
+        let engine = Rc::clone(&engine);
+        window.on_like_up_next(move |index| {
+            let mut engine = engine.borrow_mut();
+            if let Some(track) = engine.up_next_tracks().get(index.max(0) as usize).cloned() {
+                engine.toggle_like(&track);
+            }
+        });
+    }
+    {
+        let engine = Rc::clone(&engine);
+        window.on_play_up_next(move |index| engine.borrow_mut().play_up_next(index.max(0) as usize));
     }
     {
         let engine = Rc::clone(&engine);
