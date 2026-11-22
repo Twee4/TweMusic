@@ -518,19 +518,31 @@ fn main() -> Result<(), slint::PlatformError> {
             let playing = window.get_playing();
             let (target, spin) = if playing { (&cookie, 0.6) } else { (&squircle, 0.0) };
             art_morph.step(target, dt, spin);
-            let shaped = match now_pixels.borrow().as_ref() {
-                Some(pixels) if playing || !art_morph.settled(target) => {
-                    if art_key != Some((pixels.as_bytes().as_ptr() as usize, pixels.width(), pixels.height())) {
-                        art_key = Some((pixels.as_bytes().as_ptr() as usize, pixels.width(), pixels.height()));
+            // Once there is a picture it is always shown through the outline (a rounded square at
+            // rest), so nothing swaps when the song pauses; it is only redrawn while it moves.
+            let moving = playing || !art_morph.settled(target);
+            match now_pixels.borrow().as_ref() {
+                Some(pixels) => {
+                    let key = (pixels.as_bytes().as_ptr() as usize, pixels.width(), pixels.height());
+                    let changed = art_key != Some(key);
+                    if changed {
+                        art_key = Some(key);
                         art_small = square_thumbnail(pixels, ART_SIZE);
                     }
-                    art_small.as_ref().map(|rgba| {
-                        SharedPixelBuffer::<Rgba8Pixel>::clone_from_slice(&art_morph.mask(rgba, ART_SIZE), ART_SIZE, ART_SIZE)
-                    })
+                    if moving || changed {
+                        if let Some(rgba) = &art_small {
+                            let cut = art_morph.mask(rgba, ART_SIZE);
+                            window.set_now_art_shaped(Image::from_rgba8(SharedPixelBuffer::<Rgba8Pixel>::clone_from_slice(&cut, ART_SIZE, ART_SIZE)));
+                        }
+                    }
                 }
-                _ => None,
-            };
-            window.set_now_art_shaped(shaped.map(Image::from_rgba8).unwrap_or_default());
+                None => {
+                    if art_key.take().is_some() {
+                        art_small = None;
+                        window.set_now_art_shaped(Image::default());
+                    }
+                }
+            }
             // The progress bar waves while the song plays and settles flat when it pauses.
             let target_wave = if playing { 1.0 } else { 0.0 };
             wave_amplitude += (target_wave - wave_amplitude) * (1.0 - (-dt * 8.0).exp());
