@@ -34,11 +34,17 @@ const LOOKUP_BUDGET: Duration = Duration::from_secs(5);
 /// the address at once fails, so ask for two bytes until the address starts working. Returns
 /// as soon as it does; on any other answer or error it returns too and lets the player decide.
 pub fn wait_until_playable(stream: &Stream) {
+    wait_until_playable_within(stream, READY_PATIENCE);
+}
+
+/// Like `wait_until_playable`, but gives up after `patience`. Addresses that yt-dlp produced are
+/// meant for its own headers, so this probe may be refused for good while the player is fine.
+pub fn wait_until_playable_within(stream: &Stream, patience: Duration) {
     if !is_allowed_stream_url(&stream.url) {
         return;
     }
     let Ok(http) = crate::transport::http_client() else { return };
-    let deadline = Instant::now() + READY_PATIENCE;
+    let deadline = Instant::now() + patience;
     loop {
         let answer = http
             .get(&stream.url)

@@ -13,7 +13,7 @@ pub mod transport;
 
 use thiserror::Error;
 
-pub use player::{is_allowed_stream_url, resolve, wait_until_playable, Stream};
+pub use player::{is_allowed_stream_url, resolve, wait_until_playable, wait_until_playable_within, Stream};
 
 #[derive(Error, Debug)]
 pub enum InnerTubeError {

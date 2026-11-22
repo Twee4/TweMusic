@@ -47,7 +47,7 @@ pub fn resolve(video_id: &str, browser: Option<&str>) -> Result<Stream, String> 
     let looked_up = started.elapsed();
     // Fresh addresses are refused for a few seconds; wait here, off the UI thread, so the
     // player only ever opens an address that works.
-    twe_innertube::wait_until_playable(&stream);
+    twe_innertube::wait_until_playable_within(&stream, std::time::Duration::from_secs(4));
     eprintln!(
         "[timing] {video_id}: lookup {:.1}s, wait for address {:.1}s",
         looked_up.as_secs_f32(),
@@ -111,7 +111,7 @@ pub fn resolve_after_direct_failure(video_id: &str, browser: &str) -> Result<Str
         *slot = Some(Instant::now() + SKIP_DIRECT_FOR);
     }
     let stream = via_ytdlp(video_id, if is_supported_browser(browser) { browser } else { NO_SIGN_IN })?;
-    twe_innertube::wait_until_playable(&stream);
+    twe_innertube::wait_until_playable_within(&stream, std::time::Duration::from_secs(4));
     Ok(stream)
 }
 
