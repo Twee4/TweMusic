@@ -684,6 +684,7 @@ export component AppWindow inherits Window {
     in property <bool> loading: false;
     in property <image> wave-image;
     in property <image> now-art-shaped;
+    in property <image> big-art;
     in property <image> play-shape;
     in property <image> loader-shape;
     in property <float> wave-extent: 0;
@@ -728,6 +729,7 @@ export component AppWindow inherits Window {
     in-out property <int> selected-playlist: 0;
     in property <string> playlist-title;
     in property <[Entry]> library-rows;
+    in property <[Entry]> up-next-rows;
     in-out property <string> new-playlist;
     in-out property <string> import-url;
     callback select-playlist(int);
@@ -737,6 +739,8 @@ export component AppWindow inherits Window {
     callback delete-playlist();
     callback remove-track(int);
     callback play-library(int);
+    callback play-up-next(int);
+    callback like-up-next(int);
 
     // Settings
     in-out property <bool> set-notifications: true;
@@ -754,6 +758,18 @@ export component AppWindow inherits Window {
         }
         root.search-open = true;
         search-field.focus-input();
+    }
+    // The Up next page (screen 4); the same button leaves it again.
+    function toggle-up-next() {
+        if (root.screen == 4) {
+            root.screen = root.return-screen;
+        } else {
+            if (root.screen != 3) {
+                root.return-screen = root.screen;
+            }
+            root.search-open = false;
+            root.screen = 4;
+        }
     }
     function close-search() {
         root.search-open = false;
@@ -964,6 +980,90 @@ export component AppWindow inherits Window {
         }
         }
 
+        // Now playing: the big artwork on the left, what is queued next on the right.
+        if root.screen == 4 : HorizontalLayout {
+            spacing: 16px;
+            Rectangle {
+                horizontal-stretch: 1;
+                border-radius: 28px;
+                background: Palette.glass;
+                property <length> side: max(120px, min(self.height - 150px, self.width - 64px));
+                Image {
+                    visible: root.big-art.width > 0;
+                    source: root.big-art;
+                    width: parent.side;
+                    height: parent.side;
+                    x: (parent.width - self.width) / 2;
+                    y: 24px;
+                    image-fit: fill;
+                }
+                Art {
+                    visible: root.big-art.width == 0;
+                    tint: Palette.accent;
+                    source: root.now-art;
+                    border-radius: 40px;
+                    width: parent.side;
+                    height: parent.side;
+                    x: (parent.width - self.width) / 2;
+                    y: 24px;
+                }
+                Text {
+                    text: root.now-title;
+                    x: 24px;
+                    y: 24px + parent.side + 14px;
+                    width: parent.width - 48px;
+                    horizontal-alignment: center;
+                    overflow: elide;
+                    font-size: 22px;
+                    font-weight: 700;
+                    color: Palette.on-surface;
+                }
+                Text {
+                    text: root.now-artist;
+                    x: 24px;
+                    y: 24px + parent.side + 46px;
+                    width: parent.width - 48px;
+                    horizontal-alignment: center;
+                    overflow: elide;
+                    font-size: 15px;
+                    color: Palette.on-surface-variant;
+                }
+            }
+            if root.column-width > 760px : Rectangle {
+                width: clamp(300px, root.column-width * 0.32, 400px);
+                border-radius: 28px;
+                background: Palette.glass;
+                Text {
+                    x: 20px;
+                    y: 16px;
+                    text: root.up-next-rows.length > 0 ? "Up next" : "Nothing queued yet";
+                    font-size: 18px;
+                    font-weight: 700;
+                    color: Palette.on-surface;
+                }
+                Flickable {
+                    x: 8px;
+                    y: 56px;
+                    width: parent.width - 16px;
+                    height: parent.height - 64px;
+                    content-width: self.width;
+                    VerticalLayout {
+                        width: parent.width;
+                        alignment: start;
+                        spacing: 2px;
+                        padding-bottom: 12px;
+                        for entry[i] in root.up-next-rows : TrackRow {
+                            entry: entry;
+                            action-glyph: entry.liked ? Glyphs.heart-filled : Glyphs.heart;
+                            action-active: entry.liked;
+                            clicked => { root.play-up-next(i); }
+                            action => { root.like-up-next(i); }
+                        }
+                    }
+                }
+            }
+        }
+
         // Search results
         if root.screen == 3 : VerticalLayout {
             spacing: 8px;
@@ -1163,6 +1263,15 @@ export component AppWindow inherits Window {
             height: 128px;
             border-radius: 28px;
             background: Palette.glass;
+            // Tapping the artwork or title opens (and closes) the Now playing page.
+            TouchArea {
+                x: 0px;
+                y: 0px;
+                width: parent.width - 330px;
+                height: 88px;
+                mouse-cursor: pointer;
+                clicked => { root.toggle-up-next(); }
+            }
             VerticalLayout {
                 padding: 16px;
                 spacing: 6px;

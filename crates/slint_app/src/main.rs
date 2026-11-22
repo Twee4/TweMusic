@@ -166,6 +166,8 @@ fn apply_palette(window: &AppWindow, scheme: &ColorScheme) {
 /// Side of the picture the album-art outline is cut from (twice the 56 px it is shown at).
 const ART_SIZE: u32 = 112;
 const BUTTON_SIZE: u32 = 96;
+/// Side of the picture for the big artwork on the Now playing page.
+const BIG_SIZE: u32 = 360;
 
 /// `pixels` cropped to a square in the middle and shrunk to `size` x `size` RGBA bytes.
 fn square_thumbnail(pixels: &Pixels, size: u32) -> Option<Vec<u8>> {
@@ -222,6 +224,7 @@ struct ListKey {
     playlist: u64,
     selected_playlist: usize,
     playlist_names: u64,
+    up_next: u64,
 }
 
 /// Copies the engine's state into the window. Cheap values are set every time; the song lists
@@ -236,9 +239,10 @@ fn sync(window: &AppWindow, engine: &Engine, art: &mut Art, key: &mut ListKey, n
         pick: engine.pick.as_ref().map(|pick| (pick.day, pick.track.id.0)),
         art_version: art.version(),
         results: fingerprint(&engine.state.remote_results),
-        liked_marks: engine.state.remote_results.iter().filter(|track| engine.is_liked(track)).count(),
+        liked_marks: engine.state.remote_results.iter().chain(engine.up_next_tracks().iter()).filter(|track| engine.is_liked(track)).count(),
         playlist: fingerprint(&engine.playlist_tracks()),
         selected_playlist: engine.selected_playlist,
+        up_next: fingerprint(&engine.up_next_tracks()),
         playlist_names: engine.library.playlists.iter().fold(0u64, |acc, playlist| {
             acc.wrapping_mul(31).wrapping_add(playlist.name.len() as u64).wrapping_add(playlist.tracks.len() as u64 * 7)
         }),
@@ -261,6 +265,7 @@ fn sync(window: &AppWindow, engine: &Engine, art: &mut Art, key: &mut ListKey, n
         window.set_selected_playlist(engine.selected_playlist as i32);
         window.set_playlist_title(engine.library.playlists.get(engine.selected_playlist).map_or("", |playlist| playlist.name.as_str()).into());
         window.set_library_rows(entries_of(&engine.playlist_tracks(), art, |_| false));
+        window.set_up_next_rows(entries_of(&engine.up_next_tracks(), art, |track| engine.is_liked(track)));
         match &engine.pick {
             Some(pick) => {
                 window.set_pick(song_of(&pick.track, art));
@@ -420,6 +425,19 @@ fn main() -> Result<(), slint::PlatformError> {
     }
     {
         let engine = Rc::clone(&engine);
+        window.on_like_up_next(move |index| {
+            let mut engine = engine.borrow_mut();
+            if let Some(track) = engine.up_next_tracks().get(index.max(0) as usize).cloned() {
+                engine.toggle_like(&track);
+            }
+        });
+    }
+    {
+        let engine = Rc::clone(&engine);
+        window.on_play_up_next(move |index| engine.borrow_mut().play_up_next(index.max(0) as usize));
+    }
+    {
+        let engine = Rc::clone(&engine);
         window.on_play_library(move |index| {
             let mut engine = engine.borrow_mut();
             let tracks = engine.playlist_tracks();
@@ -514,6 +532,9 @@ fn main() -> Result<(), slint::PlatformError> {
         let mut button_drawn = false;
         let mut art_key: Option<(usize, u32, u32)> = None;
         let mut art_small: Option<Vec<u8>> = None;
+        let mut art_big: Option<Vec<u8>> = None;
+        let mut art_big_key: Option<(usize, u32, u32)> = None;
+        let mut big_dirty = true;
         let mut seen_progress = 0.0_f32;
         let mut seen_at = Instant::now();
         let mut wave_phase = 0.0_f32;
@@ -575,6 +596,33 @@ fn main() -> Result<(), slint::PlatformError> {
                 loader_drawn = false;
                 loader_clock = 0.0;
                 window.set_loader_shape(Image::default());
+            }
+            // The Now playing page shows the same morphing artwork large; it is only cut while open.
+            if window.get_screen() == 4 {
+                match now_pixels.borrow().as_ref() {
+                    Some(pixels) => {
+                        let key = (pixels.as_bytes().as_ptr() as usize, pixels.width(), pixels.height());
+                        if art_big_key != Some(key) {
+                            art_big_key = Some(key);
+                            art_big = square_thumbnail(pixels, BIG_SIZE);
+                            big_dirty = true;
+                        }
+                        if moving || big_dirty {
+                            if let Some(rgba) = &art_big {
+                                let cut = art_morph.mask(rgba, BIG_SIZE, 1.0);
+                                window.set_big_art(Image::from_rgba8(SharedPixelBuffer::<Rgba8Pixel>::clone_from_slice(&cut, BIG_SIZE, BIG_SIZE)));
+                            }
+                            big_dirty = false;
+                        }
+                    }
+                    None => {
+                        art_big_key = None;
+                        art_big = None;
+                        window.set_big_art(Image::default());
+                    }
+                }
+            } else {
+                big_dirty = true;
             }
             // The progress bar waves while the song plays and settles flat when it pauses.
             let target_wave = if playing { 1.0 } else { 0.0 };
