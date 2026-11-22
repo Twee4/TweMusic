@@ -671,6 +671,8 @@ export component AppWindow inherits Window {
     in property <float> progress: 0;
     // Length of the current song in seconds (0 when unknown); the arrow keys seek 5 s at a time.
     in property <float> now-length: 0;
+    // The progress shown on the bar: the reported one, moved on smoothly between reports (set by Rust).
+    in property <float> smooth-progress: 0;
     in property <string> time-position: "0:00";
     in property <string> time-duration: "0:00";
 
@@ -1195,7 +1197,7 @@ export component AppWindow inherits Window {
                     }
                     seek := SeekBar {
                         horizontal-stretch: 1;
-                        progress: root.progress;
+                        progress: root.smooth-progress;
                         wave-image: root.wave-image;
                         wave-extent: root.wave-extent;
                         seek(fraction) => { root.seek(fraction); }

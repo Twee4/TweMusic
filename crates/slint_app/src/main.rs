@@ -504,6 +504,8 @@ fn main() -> Result<(), slint::PlatformError> {
         let mut art_morph = shape::Morph::new();
         let mut art_key: Option<(usize, u32, u32)> = None;
         let mut art_small: Option<Vec<u8>> = None;
+        let mut seen_progress = 0.0_f32;
+        let mut seen_at = Instant::now();
         let mut wave_phase = 0.0_f32;
         let mut wave_amplitude = 0.0_f32;
         color_timer.start(TimerMode::Repeated, Duration::from_millis(16), move || {
@@ -533,7 +535,21 @@ fn main() -> Result<(), slint::PlatformError> {
             let target_wave = if playing { 1.0 } else { 0.0 };
             wave_amplitude += (target_wave - wave_amplitude) * (1.0 - (-dt * 8.0).exp());
             wave_phase = (wave_phase + dt * 5.0) % std::f32::consts::TAU;
-            let played = window.get_seek_width() * window.get_progress().clamp(0.0, 1.0);
+            // The engine reports the position a few times a second; in between, the bar is moved on
+            // by the time that has passed so the thumb and wave glide.
+            let reported = window.get_progress();
+            if (reported - seen_progress).abs() > f32::EPSILON {
+                seen_progress = reported;
+                seen_at = now;
+            }
+            let length = window.get_now_length();
+            let smooth = if playing && length > 0.0 {
+                (seen_progress + seen_at.elapsed().as_secs_f32().min(0.6) / length).min(1.0)
+            } else {
+                seen_progress
+            };
+            window.set_smooth_progress(smooth);
+            let played = window.get_seek_width() * smooth.clamp(0.0, 1.0);
             if wave_amplitude > 0.02 && played > 6.0 {
                 window.set_wave_extent(played);
                 window.set_wave_image(wave_image(played, wave_amplitude, wave_phase));
