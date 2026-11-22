@@ -26,6 +26,8 @@ pub struct Stream {
 
 /// How long to keep asking before giving up on an address that still answers 403.
 const READY_PATIENCE: Duration = Duration::from_secs(14);
+/// How long the direct lookup keeps trying more clients before the caller falls back.
+const LOOKUP_BUDGET: Duration = Duration::from_secs(5);
 
 /// YouTube now answers 403 for the first few seconds after it hands out a stream address
 /// (yt-dlp sleeps about six seconds before downloading for this reason). A player that opens
@@ -137,6 +139,7 @@ pub fn resolve_with(video_id: &str, profiles: &[ClientProfile]) -> Result<Stream
     if ids::youtube_music_url(video_id).is_none() {
         return Err(InnerTubeError::Api("Invalid video ID.".to_owned()));
     }
+    let started = Instant::now();
     let http = transport::http_client()?;
     let visitor_data = cached_visitor_data(&http);
 
@@ -147,6 +150,11 @@ pub fn resolve_with(video_id: &str, profiles: &[ClientProfile]) -> Result<Stream
     }
     let mut failures: Vec<(String, InnerTubeError)> = Vec::new();
     for index in clients::rotation(usable.len()) {
+        // When the first clients have all failed, going through the rest rarely helps and the
+        // person is waiting: give up and let the caller fall back.
+        if !failures.is_empty() && started.elapsed() > LOOKUP_BUDGET {
+            break;
+        }
         let client = usable[index];
         let body = request_body(client, video_id, visitor_data.as_deref());
         let attempt = transport::post_player(&http, client, &body, visitor_data.as_deref())
