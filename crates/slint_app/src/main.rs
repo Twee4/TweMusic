@@ -296,6 +296,7 @@ fn sync(window: &AppWindow, engine: &Engine, art: &mut Art, key: &mut ListKey, n
     });
     window.set_time_position(clock(engine.position));
     window.set_time_duration(clock(engine.duration));
+    window.set_now_length(engine.duration.unwrap_or(0.0) as f32);
 }
 
 fn main() -> Result<(), slint::PlatformError> {
@@ -505,7 +506,7 @@ fn main() -> Result<(), slint::PlatformError> {
         let mut art_small: Option<Vec<u8>> = None;
         let mut wave_phase = 0.0_f32;
         let mut wave_amplitude = 0.0_f32;
-        color_timer.start(TimerMode::Repeated, Duration::from_millis(33), move || {
+        color_timer.start(TimerMode::Repeated, Duration::from_millis(16), move || {
             let now = Instant::now();
             let dt = now.duration_since(last).as_secs_f32();
             last = now;
