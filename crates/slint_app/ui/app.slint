@@ -499,7 +499,7 @@ component Field inherits Rectangle {
     height: 48px;
     border-radius: 24px;
     background: Palette.glass;
-    public function focus() { input.focus(); }
+    public function focus-input() { input.focus(); }
     init => {
         if (root.auto-focus) {
             input.focus();
@@ -753,7 +753,7 @@ export component AppWindow inherits Window {
             root.screen = 3;
         }
         root.search-open = true;
-        search-field.focus();
+        search-field.focus-input();
     }
     function close-search() {
         root.search-open = false;
