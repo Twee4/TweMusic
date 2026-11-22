@@ -504,7 +504,9 @@ fn main() -> Result<(), slint::PlatformError> {
         let (cookie, squircle) = (shape::COOKIE_9.radii(), shape::squircle());
         let mut art_morph = shape::Morph::new();
         // The play button: a circle (slanted while playing), with a shape cycling inside it while loading.
-        let (circle, slanted, loader_shapes) = (shape::CIRCLE.radii(), shape::slanted(), shape::loader_shapes());
+        // Paused (or loading) the button is a circle about as big as before (48 of the 68 px); playing it grows into the slanted shape.
+        let circle = shape::CIRCLE.radii().map(|radius| radius * 0.71);
+        let (slanted, loader_shapes) = (shape::slanted(), shape::loader_shapes());
         let white = vec![255u8; (BUTTON_SIZE * BUTTON_SIZE * 4) as usize];
         let (mut button_morph, mut loader_morph) = (shape::Morph::new(), shape::Morph::new());
         let mut loader_clock = 0.0_f32;
@@ -566,7 +568,7 @@ fn main() -> Result<(), slint::PlatformError> {
                 loader_clock += dt;
                 let which = (loader_clock / 0.6) as usize % loader_shapes.len();
                 loader_morph.step(&loader_shapes[which], dt, 2.0);
-                let cut = loader_morph.mask(&white, BUTTON_SIZE, 0.5);
+                let cut = loader_morph.mask(&white, BUTTON_SIZE, 0.36);
                 window.set_loader_shape(Image::from_rgba8(SharedPixelBuffer::<Rgba8Pixel>::clone_from_slice(&cut, BUTTON_SIZE, BUTTON_SIZE)));
                 loader_drawn = true;
             } else if loader_drawn {
