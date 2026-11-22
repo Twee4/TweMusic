@@ -499,6 +499,7 @@ component Field inherits Rectangle {
     height: 48px;
     border-radius: 24px;
     background: Palette.glass;
+    public function focus() { input.focus(); }
     init => {
         if (root.auto-focus) {
             input.focus();
@@ -752,6 +753,7 @@ export component AppWindow inherits Window {
             root.screen = 3;
         }
         root.search-open = true;
+        search-field.focus();
     }
     function close-search() {
         root.search-open = false;
@@ -863,13 +865,44 @@ export component AppWindow inherits Window {
                 color: Palette.on-surface;
             }
             Rectangle { horizontal-stretch: 1; }
+            // The search button grows leftwards into the search box (Material 3 Expressive spring),
+            // right where the button sits, so nothing below it ever moves.
             VerticalLayout {
                 alignment: center;
-                RoundButton {
-                    glyph: Glyphs.search;
-                    diameter: 44px;
-                    fill: root.screen == 3 ? Palette.accent : #00000000;
-                    clicked => { root.open-search(); }
+                Rectangle {
+                    width: root.search-open ? min(520px, root.column-width - 220px) : 44px;
+                    height: 44px;
+                    border-radius: 22px;
+                    background: root.search-open ? Palette.glass-solid : (root.screen == 3 ? Palette.accent : #00000000);
+                    animate width { duration: 380ms; easing: cubic-bezier(0.3, 1.25, 0.64, 1); }
+                    animate background { duration: 200ms; }
+                    search-field := Field {
+                        x: 0px;
+                        width: parent.width - 44px;
+                        height: 44px;
+                        background: #00000000;
+                        placeholder: "Search songs, artists, albums";
+                        text <=> root.query;
+                        opacity: root.search-open ? 1 : 0;
+                        animate opacity { duration: root.search-open ? 220ms : 90ms; delay: root.search-open ? 140ms : 0ms; }
+                        accepted => { root.search(root.query); }
+                    }
+                    RoundButton {
+                        x: parent.width - 44px;
+                        glyph: Glyphs.search;
+                        diameter: 44px;
+                        fill: #00000000;
+                        ink: root.search-open || root.screen == 3 ? #ffffff : #e8e0f0;
+                        clicked => {
+                            if (root.search-open && root.query != "") {
+                                root.search(root.query);
+                            } else if (root.search-open) {
+                                root.close-search();
+                            } else {
+                                root.open-search();
+                            }
+                        }
+                    }
                 }
             }
         }
@@ -933,7 +966,6 @@ export component AppWindow inherits Window {
         // Search results
         if root.screen == 3 : VerticalLayout {
             spacing: 8px;
-            padding-top: root.search-open ? 64px : 0px;
             Text {
                 text: root.search-status != "" ? root.search-status : "Search for songs, artists and albums.";
                 font-size: 14px;
@@ -954,7 +986,11 @@ export component AppWindow inherits Window {
                         entry: entry;
                         action-glyph: entry.liked ? Glyphs.heart-filled : Glyphs.heart;
                         action-active: entry.liked;
-                        clicked => { root.play-result(i); }
+                        clicked => {
+                            root.play-result(i);
+                            root.search-open = false;
+                            keys.focus();
+                        }
                         action => { root.like-result(i); }
                     }
                 }
@@ -1237,45 +1273,6 @@ export component AppWindow inherits Window {
             }
         }
         Rectangle { height: 24px; }
-    }
-
-    // Search box: floats under the top bar. Tapping anywhere else on the page collapses it.
-    if root.screen == 3 && root.search-open : TouchArea {
-        x: 32px + 80px + 24px;
-        y: 64px + 56px;
-        width: parent.width - self.x;
-        height: parent.height - self.y;
-        clicked => { root.close-search(); }
-    }
-    if root.screen == 3 && root.search-open : Rectangle {
-        x: 32px + 80px + 24px;
-        y: 64px;
-        width: parent.width - self.x - 32px;
-        height: 48px;
-        border-radius: 24px;
-        background: Palette.glass-solid;
-        HorizontalLayout {
-            padding-right: 6px;
-            spacing: 6px;
-            Field {
-                horizontal-stretch: 1;
-                text <=> root.query;
-                placeholder: "Search songs, artists, albums";
-                auto-focus: true;
-                accepted => { root.search(root.query); }
-            }
-            VerticalLayout {
-                alignment: center;
-                RoundButton {
-                    glyph: Glyphs.search;
-                    diameter: 36px;
-                    icon-size: 20px;
-                    fill: Palette.accent;
-                    ink: #ffffff;
-                    clicked => { root.search(root.query); }
-                }
-            }
-        }
     }
 
     // Message bar
