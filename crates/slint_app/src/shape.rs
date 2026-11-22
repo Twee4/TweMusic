@@ -39,6 +39,75 @@ pub fn squircle() -> [f32; POINTS] {
     radii
 }
 
+/// Scales a radial outline so its widest point is 1.
+fn normalised(mut radii: [f32; POINTS]) -> [f32; POINTS] {
+    let widest = radii.iter().cloned().fold(0.0_f32, f32::max);
+    for radius in &mut radii {
+        *radius /= widest;
+    }
+    radii
+}
+
+/// A superellipse `width` wide and `height` tall (both at most 1) with corner sharpness `n`.
+fn superellipse(width: f32, height: f32, n: f32) -> [f32; POINTS] {
+    let mut radii = [1.0; POINTS];
+    for (i, radius) in radii.iter_mut().enumerate() {
+        let angle = i as f32 / POINTS as f32 * TAU;
+        *radius = 1.0 / ((angle.cos().abs() / width).powf(n) + (angle.sin().abs() / height).powf(n)).powf(1.0 / n);
+    }
+    normalised(radii)
+}
+
+/// An ellipse, `height` as tall as it is wide.
+pub fn oval(height: f32) -> [f32; POINTS] {
+    superellipse(1.0, height, 2.0)
+}
+
+/// A wide rounded pill.
+pub fn pill() -> [f32; POINTS] {
+    superellipse(1.0, 0.68, 3.2)
+}
+
+/// A rounded regular polygon: `rounding` 0 is sharp, 1 is a circle.
+pub fn polygon(sides: u32, rounding: f32) -> [f32; POINTS] {
+    let mut radii = [1.0; POINTS];
+    let sector = TAU / sides as f32;
+    for (i, radius) in radii.iter_mut().enumerate() {
+        let angle = i as f32 / POINTS as f32 * TAU;
+        let from_middle = (angle.rem_euclid(sector)) - sector / 2.0;
+        let sharp = (sector / 2.0).cos() / from_middle.cos();
+        *radius = sharp + (1.0 - sharp) * rounding;
+    }
+    normalised(radii)
+}
+
+/// The "slanted" shape: a rounded square leaning to the right.
+pub fn slanted() -> [f32; POINTS] {
+    const LEAN: f32 = 0.32;
+    const SHARPNESS: f32 = 6.0;
+    let mut radii = [1.0; POINTS];
+    for (i, radius) in radii.iter_mut().enumerate() {
+        let angle = i as f32 / POINTS as f32 * TAU;
+        let (cos, sin) = (angle.cos(), angle.sin());
+        // The point at distance r is on the outline when it, un-leaned, is on the rounded square.
+        *radius = 1.0 / ((cos + LEAN * sin).abs().powf(SHARPNESS) + sin.abs().powf(SHARPNESS)).powf(1.0 / SHARPNESS);
+    }
+    normalised(radii)
+}
+
+/// The shapes the loader cycles through, like Material 3 Expressive's loading indicator.
+pub fn loader_shapes() -> Vec<[f32; POINTS]> {
+    vec![
+        COOKIE_9.radii(),
+        polygon(5, 0.45),
+        pill(),
+        SOFT_BURST.radii(),
+        Shape { lobes: 7, amplitude: 0.07, sharpness: 1.0 }.radii(),
+        oval(0.7),
+        SUNNY.radii(),
+    ]
+}
+
 impl Shape {
     /// The outline as distances from the centre, 1.0 at the widest point.
     pub fn radii(self) -> [f32; POINTS] {
@@ -93,9 +162,9 @@ impl Morph {
         square && (0..POINTS).all(|i| (target[i] - self.radii[i]).abs() < 0.002 && self.velocity[i].abs() < 0.01)
     }
 
-    /// Cuts the outline out of a square picture (`size` x `size` RGBA pixels): what lies outside
-    /// becomes transparent, with a one pixel soft edge.
-    pub fn mask(&self, rgba: &[u8], size: u32) -> Vec<u8> {
+    /// Cuts the outline (drawn at `scale` of the full size) out of a square picture (`size` x
+    /// `size` RGBA pixels): what lies outside becomes transparent, with a one pixel soft edge.
+    pub fn mask(&self, rgba: &[u8], size: u32, scale: f32) -> Vec<u8> {
         let mut out = rgba.to_vec();
         let centre = size as f32 / 2.0;
         for y in 0..size {
@@ -105,7 +174,7 @@ impl Morph {
                 let at = angle / TAU * POINTS as f32;
                 let (low, fraction) = (at.floor() as usize % POINTS, at.fract());
                 let radius = self.radii[low] + (self.radii[(low + 1) % POINTS] - self.radii[low]) * fraction;
-                let coverage = (centre * radius - dx.hypot(dy) + 0.5).clamp(0.0, 1.0);
+                let coverage = (centre * scale * radius - dx.hypot(dy) + 0.5).clamp(0.0, 1.0);
                 let alpha = ((y * size + x) * 4 + 3) as usize;
                 out[alpha] = (f32::from(out[alpha]) * coverage) as u8;
             }
@@ -157,7 +226,7 @@ mod tests {
     fn mask_clears_the_corners_of_a_circle_and_keeps_the_middle() {
         let size = 32;
         let picture = vec![255_u8; (size * size * 4) as usize];
-        let masked = Morph::new().mask(&picture, size);
+        let masked = Morph::new().mask(&picture, size, 1.0);
         let alpha = |x: u32, y: u32| masked[((y * size + x) * 4 + 3) as usize];
         assert_eq!(alpha(0, 0), 0);
         assert_eq!(alpha(16, 16), 255);
@@ -183,6 +252,21 @@ mod tests {
             morph.step(&target, 0.016, 0.0);
         }
         assert!(morph.settled(&target));
+    }
+
+    #[test]
+    fn new_shapes_fit_the_box_and_keep_their_character() {
+        for radii in [slanted(), pill(), oval(0.7), polygon(5, 0.45)] {
+            let widest = radii.iter().cloned().fold(0.0_f32, f32::max);
+            let narrowest = radii.iter().cloned().fold(f32::MAX, f32::min);
+            assert!((widest - 1.0).abs() < 1e-5);
+            assert!(narrowest > 0.4 && narrowest < 0.95, "{narrowest}");
+        }
+        // The slanted shape leans: it is longer along one diagonal than the other.
+        let radii = slanted();
+        let at = |degrees: f32| radii[(degrees / 360.0 * POINTS as f32).round() as usize % POINTS];
+        assert!((at(-45.0 + 360.0) - at(45.0)).abs() > 0.05);
+        assert_eq!(loader_shapes().len(), 7);
     }
 
     #[test]

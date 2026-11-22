@@ -165,6 +165,7 @@ fn apply_palette(window: &AppWindow, scheme: &ColorScheme) {
 
 /// Side of the picture the album-art outline is cut from (twice the 56 px it is shown at).
 const ART_SIZE: u32 = 112;
+const BUTTON_SIZE: u32 = 96;
 
 /// `pixels` cropped to a square in the middle and shrunk to `size` x `size` RGBA bytes.
 fn square_thumbnail(pixels: &Pixels, size: u32) -> Option<Vec<u8>> {
@@ -502,6 +503,13 @@ fn main() -> Result<(), slint::PlatformError> {
         let now_pixels = Rc::clone(&now_pixels);
         let (cookie, squircle) = (shape::COOKIE_9.radii(), shape::squircle());
         let mut art_morph = shape::Morph::new();
+        // The play button: a circle (slanted while playing), with a shape cycling inside it while loading.
+        let (circle, slanted, loader_shapes) = (shape::CIRCLE.radii(), shape::slanted(), shape::loader_shapes());
+        let white = vec![255u8; (BUTTON_SIZE * BUTTON_SIZE * 4) as usize];
+        let (mut button_morph, mut loader_morph) = (shape::Morph::new(), shape::Morph::new());
+        let mut loader_clock = 0.0_f32;
+        let mut loader_drawn = false;
+        let mut button_drawn = false;
         let mut art_key: Option<(usize, u32, u32)> = None;
         let mut art_small: Option<Vec<u8>> = None;
         let mut seen_progress = 0.0_f32;
@@ -531,7 +539,7 @@ fn main() -> Result<(), slint::PlatformError> {
                     }
                     if moving || changed {
                         if let Some(rgba) = &art_small {
-                            let cut = art_morph.mask(rgba, ART_SIZE);
+                            let cut = art_morph.mask(rgba, ART_SIZE, 1.0);
                             window.set_now_art_shaped(Image::from_rgba8(SharedPixelBuffer::<Rgba8Pixel>::clone_from_slice(&cut, ART_SIZE, ART_SIZE)));
                         }
                     }
@@ -542,6 +550,29 @@ fn main() -> Result<(), slint::PlatformError> {
                         window.set_now_art_shaped(Image::default());
                     }
                 }
+            }
+            // Play button: slanted while playing, a circle otherwise; redrawn only while it moves.
+            let loading = window.get_loading();
+            let button_target = if playing && !loading { &slanted } else { &circle };
+            button_morph.step(button_target, dt, 0.0);
+            let button_moving = !button_morph.settled(button_target);
+            if button_moving || !button_drawn {
+                button_drawn = true;
+                let cut = button_morph.mask(&white, BUTTON_SIZE, 1.0);
+                window.set_play_shape(Image::from_rgba8(SharedPixelBuffer::<Rgba8Pixel>::clone_from_slice(&cut, BUTTON_SIZE, BUTTON_SIZE)));
+            }
+            // While loading, a smaller shape turns inside it and changes form every so often.
+            if loading {
+                loader_clock += dt;
+                let which = (loader_clock / 0.6) as usize % loader_shapes.len();
+                loader_morph.step(&loader_shapes[which], dt, 2.0);
+                let cut = loader_morph.mask(&white, BUTTON_SIZE, 0.5);
+                window.set_loader_shape(Image::from_rgba8(SharedPixelBuffer::<Rgba8Pixel>::clone_from_slice(&cut, BUTTON_SIZE, BUTTON_SIZE)));
+                loader_drawn = true;
+            } else if loader_drawn {
+                loader_drawn = false;
+                loader_clock = 0.0;
+                window.set_loader_shape(Image::default());
             }
             // The progress bar waves while the song plays and settles flat when it pauses.
             let target_wave = if playing { 1.0 } else { 0.0 };
