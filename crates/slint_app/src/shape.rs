@@ -84,7 +84,7 @@ pub fn polygon(sides: u32, rounding: f32) -> [f32; POINTS] {
 /// The "slanted" shape: a rounded square leaning to the right.
 pub fn slanted() -> [f32; POINTS] {
     const LEAN: f32 = 0.32;
-    const SHARPNESS: f32 = 6.0;
+    const SHARPNESS: f32 = 3.4;
     let mut radii = [1.0; POINTS];
     for (i, radius) in radii.iter_mut().enumerate() {
         let angle = i as f32 / POINTS as f32 * TAU;
@@ -100,10 +100,9 @@ pub fn loader_shapes() -> Vec<[f32; POINTS]> {
     vec![
         COOKIE_9.radii(),
         polygon(5, 0.45),
-        pill(),
+        COOKIE_6.radii(),
         SOFT_BURST.radii(),
         Shape { lobes: 7, amplitude: 0.07, sharpness: 1.0 }.radii(),
-        oval(0.7),
         SUNNY.radii(),
     ]
 }
@@ -266,7 +265,7 @@ mod tests {
         let radii = slanted();
         let at = |degrees: f32| radii[(degrees / 360.0 * POINTS as f32).round() as usize % POINTS];
         assert!((at(-45.0 + 360.0) - at(45.0)).abs() > 0.05);
-        assert_eq!(loader_shapes().len(), 7);
+        assert_eq!(loader_shapes().len(), 6);
     }
 
     #[test]
