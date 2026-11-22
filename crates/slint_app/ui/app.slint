@@ -1154,6 +1154,9 @@ export component AppWindow inherits Window {
         }
         }
 
+        // A little air between the scrolling page and the player, so cards are not cut flush on it.
+        Rectangle { height: 14px; }
+
         // Player: one glass card, the same width as the column.
         Rectangle {
             height: 112px;
