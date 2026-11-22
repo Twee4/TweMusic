@@ -157,6 +157,22 @@ fn apply_palette(window: &AppWindow, scheme: &ColorScheme) {
     palette.set_glass_solid(col!(scheme.surface_container_high));
 }
 
+/// The played part of the progress bar as a wave: `width` px long, 12 px tall, `phase` moves it.
+fn wave_path(width: f32, amplitude: f32, phase: f32) -> String {
+    use std::fmt::Write;
+    const WAVELENGTH: f32 = 26.0;
+    const HEIGHT: f32 = 12.0;
+    const SWING: f32 = 3.0;
+    let mut path = String::with_capacity(width as usize * 5);
+    let mut x = 0.0_f32;
+    while x <= width {
+        let y = HEIGHT / 2.0 + SWING * amplitude * (x / WAVELENGTH * std::f32::consts::TAU - phase).sin();
+        let _ = write!(path, "{} {x:.1} {y:.2} ", if x == 0.0 { "M" } else { "L" });
+        x += 2.0;
+    }
+    path
+}
+
 fn clock(seconds: Option<f64>) -> SharedString {
     let total = seconds.unwrap_or(0.0).max(0.0) as u64;
     format!("{}:{:02}", total / 60, total % 60).into()
@@ -241,6 +257,7 @@ fn sync(window: &AppWindow, engine: &Engine, art: &mut Art, key: &mut ListKey) {
     };
     window.set_now_art(picture);
     window.set_playing(engine.is_playing());
+    window.set_loading(engine.is_loading());
     window.set_now_liked(engine.current_is_liked());
     window.set_progress(match (engine.position, engine.duration) {
         (Some(position), Some(duration)) if duration > 0.0 => (position / duration) as f32,
@@ -447,11 +464,24 @@ fn main() -> Result<(), slint::PlatformError> {
         let engine = Rc::clone(&engine);
         engine.borrow_mut().request_colors();
         let mut last = Instant::now();
+        let mut wave_phase = 0.0_f32;
+        let mut wave_amplitude = 0.0_f32;
         color_timer.start(TimerMode::Repeated, Duration::from_millis(33), move || {
             let now = Instant::now();
             let dt = now.duration_since(last).as_secs_f32();
             last = now;
             let Some(window) = weak.upgrade() else { return };
+            // The progress bar waves while a song plays and settles flat when it pauses.
+            let target = if window.get_playing() { 1.0 } else { 0.0 };
+            wave_amplitude += (target - wave_amplitude) * (1.0 - (-dt * 8.0).exp());
+            wave_phase = (wave_phase + dt * 5.0) % std::f32::consts::TAU;
+            let played = window.get_seek_width() * window.get_progress().clamp(0.0, 1.0);
+            if wave_amplitude > 0.02 && played > 6.0 {
+                window.set_wave_extent(played);
+                window.set_wave_commands(wave_path(played, wave_amplitude, wave_phase).into());
+            } else {
+                window.set_wave_commands(SharedString::new());
+            }
             if let Some(scheme) = engine.borrow_mut().update_colors(dt) {
                 apply_palette(&window, &scheme);
             }
