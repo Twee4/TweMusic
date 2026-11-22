@@ -316,8 +316,9 @@ component PickCard inherits Rectangle {
 // A thin seek bar: tap or drag to jump.
 component SeekBar inherits Rectangle {
     in property <float> progress;
-    // While a song plays the played part is drawn as a moving wave (made in Rust).
-    in property <string> wave-commands;
+    // While a song plays the played part is a moving wave, drawn by Rust as a picture so its
+    // length and height are exact.
+    in property <image> wave-image;
     in property <float> wave-extent: 0;
     out property <length> bar-width: self.width;
     callback seek(float);
@@ -332,22 +333,17 @@ component SeekBar inherits Rectangle {
             width: parent.width * clamp(root.progress, 0, 1);
             border-radius: 2px;
             background: Palette.primary;
-            visible: root.wave-commands == "";
+            visible: root.wave-image.width == 0;
         }
     }
-    if root.wave-commands != "" : Path {
+    if root.wave-image.width > 0 : Image {
+        source: root.wave-image;
+        colorize: Palette.primary;
         x: 0px;
         y: (parent.height - 12px) / 2;
         width: root.wave-extent * 1px;
         height: 12px;
-        viewbox-x: 0;
-        viewbox-y: 0;
-        viewbox-width: root.wave-extent;
-        viewbox-height: 12;
-        commands: root.wave-commands;
-        stroke: Palette.primary;
-        stroke-width: 4px;
-        stroke-line-cap: round;
+        image-fit: fill;
     }
     Rectangle {
         x: parent.width * clamp(root.progress, 0, 1) - self.width / 2;
@@ -612,7 +608,8 @@ export component AppWindow inherits Window {
     in property <image> now-art;
     in property <bool> playing: false;
     in property <bool> loading: false;
-    in property <string> wave-commands;
+    in property <image> wave-image;
+    in property <image> now-art-shaped;
     in property <float> wave-extent: 0;
     out property <length> seek-width: seek.bar-width;
     in property <bool> now-liked: false;
@@ -1014,12 +1011,23 @@ export component AppWindow inherits Window {
                 spacing: 6px;
                 HorizontalLayout {
                     spacing: 14px;
-                    Art {
+                    Rectangle {
                         width: 56px;
-                        tint: Palette.accent;
-                        source: root.now-art;
-                        // A rounded square while paused, a circle while playing.
-                        border-radius: root.playing ? 28px : 14px;
+                        height: 56px;
+                        // The plain art, until Rust has cut the morphing outline out of the picture.
+                        Art {
+                            visible: root.now-art-shaped.width == 0;
+                            tint: Palette.accent;
+                            source: root.now-art;
+                            border-radius: 14px;
+                        }
+                        Image {
+                            visible: root.now-art-shaped.width > 0;
+                            source: root.now-art-shaped;
+                            width: 56px;
+                            height: 56px;
+                            image-fit: fill;
+                        }
                     }
                     VerticalLayout {
                         alignment: center;
@@ -1094,7 +1102,7 @@ export component AppWindow inherits Window {
                     seek := SeekBar {
                         horizontal-stretch: 1;
                         progress: root.progress;
-                        wave-commands: root.wave-commands;
+                        wave-image: root.wave-image;
                         wave-extent: root.wave-extent;
                         seek(fraction) => { root.seek(fraction); }
                     }
