@@ -2,6 +2,9 @@
 //! work (library, search, today's pick, playback). A timer polls the engine and copies what
 //! changed into the window.
 
+#[allow(dead_code)] // the loader shapes and path output are kept for later
+mod shape;
+
 use std::{
     cell::RefCell,
     collections::{HashMap, HashSet},
@@ -67,8 +70,11 @@ impl Art {
 
     /// The picture for `url`, or an empty image while it loads (or when it cannot be loaded).
     fn get(&self, url: &str) -> Image {
-        let pixels = self.cache.lock().ok().and_then(|cache| cache.get(url).cloned().flatten());
-        pixels.map(Image::from_rgba8).unwrap_or_default()
+        self.pixels(url).map(Image::from_rgba8).unwrap_or_default()
+    }
+
+    fn pixels(&self, url: &str) -> Option<Pixels> {
+        self.cache.lock().ok().and_then(|cache| cache.get(url).cloned().flatten())
     }
 }
 
@@ -157,20 +163,44 @@ fn apply_palette(window: &AppWindow, scheme: &ColorScheme) {
     palette.set_glass_solid(col!(scheme.surface_container_high));
 }
 
-/// The played part of the progress bar as a wave: `width` px long, 12 px tall, `phase` moves it.
-fn wave_path(width: f32, amplitude: f32, phase: f32) -> String {
-    use std::fmt::Write;
+/// Side of the picture the album-art outline is cut from (twice the 56 px it is shown at).
+const ART_SIZE: u32 = 112;
+
+/// `pixels` cropped to a square in the middle and shrunk to `size` x `size` RGBA bytes.
+fn square_thumbnail(pixels: &Pixels, size: u32) -> Option<Vec<u8>> {
+    let picture = image::RgbaImage::from_raw(pixels.width(), pixels.height(), pixels.as_bytes().to_vec())?;
+    let side = picture.width().min(picture.height());
+    let cropped = image::imageops::crop_imm(&picture, (picture.width() - side) / 2, (picture.height() - side) / 2, side, side).to_image();
+    Some(image::imageops::resize(&cropped, size, size, image::imageops::FilterType::Triangle).into_raw())
+}
+
+/// The played part of the progress bar as a wave, `width` x 12 logical pixels (drawn at twice that
+/// and white, so the window can colour it). `phase` moves the wave along.
+fn wave_image(width: f32, amplitude: f32, phase: f32) -> Image {
+    const SCALE: f32 = 2.0;
     const WAVELENGTH: f32 = 26.0;
     const HEIGHT: f32 = 12.0;
     const SWING: f32 = 3.0;
-    let mut path = String::with_capacity(width as usize * 5);
-    let mut x = 0.0_f32;
-    while x <= width {
-        let y = HEIGHT / 2.0 + SWING * amplitude * (x / WAVELENGTH * std::f32::consts::TAU - phase).sin();
-        let _ = write!(path, "{} {x:.1} {y:.2} ", if x == 0.0 { "M" } else { "L" });
-        x += 2.0;
+    const HALF_STROKE: f32 = 2.0;
+    let (columns, rows) = ((width * SCALE).ceil().max(1.0) as u32, (HEIGHT * SCALE) as u32);
+    let mut buffer = SharedPixelBuffer::<Rgba8Pixel>::new(columns, rows);
+    let pixels = buffer.make_mut_slice();
+    for column in 0..columns {
+        let x = (column as f32 + 0.5) / SCALE;
+        let angle = x / WAVELENGTH * std::f32::consts::TAU - phase;
+        let centre = HEIGHT / 2.0 + SWING * amplitude * angle.sin();
+        let slope = SWING * amplitude * std::f32::consts::TAU / WAVELENGTH * angle.cos();
+        let stretch = (1.0 + slope * slope).sqrt();
+        // The ends are round: measure from the nearest point of the line's span.
+        let along = x - x.clamp(HALF_STROKE, (width - HALF_STROKE).max(HALF_STROKE));
+        for row in 0..rows {
+            let y = (row as f32 + 0.5) / SCALE;
+            let distance = (along.hypot(y - centre)) / stretch;
+            let coverage = ((HALF_STROKE - distance) * SCALE + 0.5).clamp(0.0, 1.0);
+            pixels[(row * columns + column) as usize] = Rgba8Pixel { r: 255, g: 255, b: 255, a: (coverage * 255.0) as u8 };
+        }
     }
-    path
+    Image::from_rgba8(buffer)
 }
 
 fn clock(seconds: Option<f64>) -> SharedString {
@@ -195,7 +225,7 @@ struct ListKey {
 
 /// Copies the engine's state into the window. Cheap values are set every time; the song lists
 /// only when something they show has changed.
-fn sync(window: &AppWindow, engine: &Engine, art: &mut Art, key: &mut ListKey) {
+fn sync(window: &AppWindow, engine: &Engine, art: &mut Art, key: &mut ListKey, now_pixels: &mut Option<Pixels>) {
     window.set_greeting(engine::greeting(engine.hour).into());
 
     let next = ListKey {
@@ -256,6 +286,7 @@ fn sync(window: &AppWindow, engine: &Engine, art: &mut Art, key: &mut ListKey) {
         None => Image::default(),
     };
     window.set_now_art(picture);
+    *now_pixels = current.and_then(|track| track.thumbnail_url.as_deref()).and_then(|url| art.pixels(url));
     window.set_playing(engine.is_playing());
     window.set_loading(engine.is_loading());
     window.set_now_liked(engine.current_is_liked());
@@ -421,11 +452,14 @@ fn main() -> Result<(), slint::PlatformError> {
     }
 
     // Every 250 ms: collect finished background work, follow mpv, and refresh the window.
+    // The current song's picture, shared with the animation timer below.
+    let now_pixels: Rc<RefCell<Option<Pixels>>> = Rc::default();
     let timer = Timer::default();
     {
         let weak = window.as_weak();
         let engine = Rc::clone(&engine);
         let mut art = Art::new();
+        let now_pixels = Rc::clone(&now_pixels);
         let mut key = ListKey::default();
         let mut notice_until: Option<Instant> = None;
         timer.start(TimerMode::Repeated, Duration::from_millis(250), move || {
@@ -453,7 +487,7 @@ fn main() -> Result<(), slint::PlatformError> {
                 window.set_notice(SharedString::new());
                 notice_until = None;
             }
-            sync(&window, &engine, &mut art, &mut key);
+            sync(&window, &engine, &mut art, &mut key, &mut now_pixels.borrow_mut());
         });
     }
 
@@ -464,6 +498,11 @@ fn main() -> Result<(), slint::PlatformError> {
         let engine = Rc::clone(&engine);
         engine.borrow_mut().request_colors();
         let mut last = Instant::now();
+        let now_pixels = Rc::clone(&now_pixels);
+        let (cookie, squircle) = (shape::COOKIE_9.radii(), shape::squircle());
+        let mut art_morph = shape::Morph::new();
+        let mut art_key: Option<(usize, u32, u32)> = None;
+        let mut art_small: Option<Vec<u8>> = None;
         let mut wave_phase = 0.0_f32;
         let mut wave_amplitude = 0.0_f32;
         color_timer.start(TimerMode::Repeated, Duration::from_millis(33), move || {
@@ -471,16 +510,34 @@ fn main() -> Result<(), slint::PlatformError> {
             let dt = now.duration_since(last).as_secs_f32();
             last = now;
             let Some(window) = weak.upgrade() else { return };
-            // The progress bar waves while a song plays and settles flat when it pauses.
-            let target = if window.get_playing() { 1.0 } else { 0.0 };
-            wave_amplitude += (target - wave_amplitude) * (1.0 - (-dt * 8.0).exp());
+            // The album art is a rounded square while paused and a turning nine-sided cookie while
+            // playing; the outline springs from one to the other.
+            let playing = window.get_playing();
+            let (target, spin) = if playing { (&cookie, 0.6) } else { (&squircle, 0.0) };
+            art_morph.step(target, dt, spin);
+            let shaped = match now_pixels.borrow().as_ref() {
+                Some(pixels) if playing || !art_morph.settled(target) => {
+                    if art_key != Some((pixels.as_bytes().as_ptr() as usize, pixels.width(), pixels.height())) {
+                        art_key = Some((pixels.as_bytes().as_ptr() as usize, pixels.width(), pixels.height()));
+                        art_small = square_thumbnail(pixels, ART_SIZE);
+                    }
+                    art_small.as_ref().map(|rgba| {
+                        SharedPixelBuffer::<Rgba8Pixel>::clone_from_slice(&art_morph.mask(rgba, ART_SIZE), ART_SIZE, ART_SIZE)
+                    })
+                }
+                _ => None,
+            };
+            window.set_now_art_shaped(shaped.map(Image::from_rgba8).unwrap_or_default());
+            // The progress bar waves while the song plays and settles flat when it pauses.
+            let target_wave = if playing { 1.0 } else { 0.0 };
+            wave_amplitude += (target_wave - wave_amplitude) * (1.0 - (-dt * 8.0).exp());
             wave_phase = (wave_phase + dt * 5.0) % std::f32::consts::TAU;
             let played = window.get_seek_width() * window.get_progress().clamp(0.0, 1.0);
             if wave_amplitude > 0.02 && played > 6.0 {
                 window.set_wave_extent(played);
-                window.set_wave_commands(wave_path(played, wave_amplitude, wave_phase).into());
+                window.set_wave_image(wave_image(played, wave_amplitude, wave_phase));
             } else {
-                window.set_wave_commands(SharedString::new());
+                window.set_wave_image(Image::default());
             }
             if let Some(scheme) = engine.borrow_mut().update_colors(dt) {
                 apply_palette(&window, &scheme);
