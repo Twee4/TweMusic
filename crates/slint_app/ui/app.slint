@@ -1230,7 +1230,7 @@ export component AppWindow inherits Window {
                         RoundButton {
                             glyph: root.playing ? "M6 19h4V5H6v14zm8-14v14h4V5h-4z" : "M8 5v14l11-7z";
                             diameter: 68px;
-                            icon-size: 34px;
+                            icon-size: root.playing ? 34px : 26px;
                             rest-radius: root.playing ? 22px : 34px;
                             shape-image: root.play-shape;
                             loader-image: root.loader-shape;
