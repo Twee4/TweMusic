@@ -51,6 +51,27 @@ component Icon inherits Path {
     fill: #e8e0f0;
 }
 
+// Lets its parent be reached with Tab and used with Space or Enter, and draws a focus ring.
+component Focusable inherits Rectangle {
+    in property <length> ring-radius: 12px;
+    callback activated();
+    fs := FocusScope {
+        key-pressed(event) => {
+            if (event.text == " " || event.text == Key.Return) {
+                root.activated();
+                return accept;
+            }
+            reject
+        }
+    }
+    Rectangle {
+        border-radius: root.ring-radius;
+        border-width: fs.has-focus ? 3px : 0px;
+        border-color: #ffffff;
+        animate border-width { duration: 100ms; }
+    }
+}
+
 component RailItem inherits Rectangle {
     in property <string> glyph;
     in property <string> label;
@@ -85,6 +106,10 @@ component RailItem inherits Rectangle {
             font-weight: root.selected ? 700 : 500;
             color: root.selected ? #ffffff : #cfc6dc;
         }
+    }
+    Focusable {
+        ring-radius: 20px;
+        activated => { root.clicked(); }
     }
     ta := TouchArea {
         clicked => { root.clicked(); }
@@ -129,6 +154,10 @@ component RoundButton inherits Rectangle {
         size: root.icon-size;
         fill: root.ink;
     }
+    Focusable {
+        ring-radius: root.border-radius;
+        activated => { root.clicked(); }
+    }
     ta := TouchArea {
         clicked => { root.clicked(); }
     }
@@ -163,6 +192,10 @@ component QuickCard inherits Rectangle {
             color: Palette.on-surface;
         }
     }
+    Focusable {
+        ring-radius: root.border-radius;
+        activated => { root.clicked(); }
+    }
     ta := TouchArea {
         clicked => { root.clicked(); }
     }
@@ -195,6 +228,10 @@ component ShelfCard inherits Rectangle {
             font-size: 12px;
             color: Palette.on-surface-variant;
         }
+    }
+    Focusable {
+        ring-radius: 12px;
+        activated => { root.clicked(); }
     }
     ta := TouchArea {
         clicked => { root.clicked(); }
@@ -285,6 +322,10 @@ component PickCard inherits Rectangle {
             }
         }
     }
+    Focusable {
+        ring-radius: root.border-radius;
+        activated => { root.clicked(); }
+    }
     ta := TouchArea {
         clicked => { root.clicked(); }
     }
@@ -300,6 +341,19 @@ component SeekBar inherits Rectangle {
     out property <length> bar-width: self.width;
     callback seek(float);
     height: 20px;
+    fs := FocusScope {
+        key-pressed(event) => {
+            if (event.text == Key.RightArrow && !event.modifiers.control) {
+                root.seek(clamp(root.progress + 0.02, 0, 1));
+                return accept;
+            }
+            if (event.text == Key.LeftArrow && !event.modifiers.control) {
+                root.seek(clamp(root.progress - 0.02, 0, 1));
+                return accept;
+            }
+            reject
+        }
+    }
     Rectangle {
         // While the wave is shown the track only runs from its end, so no line shows behind it.
         x: root.wave-image.width > 0 ? parent.width * clamp(root.progress, 0, 1) : 0px;
@@ -332,6 +386,8 @@ component SeekBar inherits Rectangle {
         height: 12px;
         border-radius: 6px;
         background: Palette.primary;
+        border-width: fs.has-focus ? 3px : 0px;
+        border-color: #ffffff;
     }
     TouchArea {
         clicked => { root.seek(clamp(self.mouse-x / self.width, 0, 1)); }
@@ -372,6 +428,10 @@ component TextButton inherits Rectangle {
             color: #ffffff;
         }
     }
+    Focusable {
+        ring-radius: root.border-radius;
+        activated => { if (root.enabled) { root.clicked(); } }
+    }
     ta := TouchArea {
         enabled: root.enabled;
         clicked => { root.clicked(); }
@@ -402,6 +462,10 @@ component Chip inherits Rectangle {
             font-weight: 600;
             color: Palette.on-surface;
         }
+    }
+    Focusable {
+        ring-radius: root.border-radius;
+        activated => { root.clicked(); }
     }
     ta := TouchArea {
         clicked => { root.clicked(); }
@@ -457,6 +521,10 @@ component TrackRow inherits Rectangle {
         border-radius: root.border-radius;
         background: ta.pressed ? #ffffff1a : #00000000;
         animate background { duration: 80ms; }
+    }
+    Focusable {
+        ring-radius: root.border-radius;
+        activated => { root.clicked(); }
     }
     ta := TouchArea {
         clicked => { root.clicked(); }
@@ -552,6 +620,13 @@ component SwitchRow inherits Rectangle {
                     }
                 }
             }
+        }
+    }
+    Focusable {
+        ring-radius: root.border-radius;
+        activated => {
+            root.on = !root.on;
+            root.toggled(root.on);
         }
     }
     TouchArea {
@@ -659,7 +734,37 @@ export component AppWindow inherits Window {
         if (root.results.length == 0) {
             root.screen = root.return-screen;
         }
+        keys.focus();
     }
+    init => { keys.focus(); }
+
+    // Everything sits inside one focus scope: Space plays or pauses, / searches, Escape closes
+    // the search, Ctrl+Left and Ctrl+Right go to the previous and next song, and the arrow keys
+    // seek while the progress bar has focus.
+    keys := FocusScope {
+        key-pressed(event) => {
+            if (event.text == " ") {
+                root.toggle-pause();
+                return accept;
+            }
+            if (event.text == Key.Escape && root.search-open) {
+                root.close-search();
+                return accept;
+            }
+            if (event.text == "/") {
+                root.open-search();
+                return accept;
+            }
+            if (event.modifiers.control && event.text == Key.RightArrow) {
+                root.next();
+                return accept;
+            }
+            if (event.modifiers.control && event.text == Key.LeftArrow) {
+                root.previous();
+                return accept;
+            }
+            reject
+        }
 
     // Aurora: soft colour blobs behind everything.
     Rectangle {
@@ -1154,5 +1259,6 @@ export component AppWindow inherits Window {
             vertical-alignment: center;
             overflow: elide;
         }
+    }
     }
 }
