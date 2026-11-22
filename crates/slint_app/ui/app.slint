@@ -301,6 +301,9 @@ component SeekBar inherits Rectangle {
     callback seek(float);
     height: 20px;
     Rectangle {
+        // While the wave is shown the track only runs from its end, so no line shows behind it.
+        x: root.wave-image.width > 0 ? parent.width * clamp(root.progress, 0, 1) : 0px;
+        width: parent.width - self.x;
         y: (parent.height - self.height) / 2;
         height: 4px;
         border-radius: 2px;
