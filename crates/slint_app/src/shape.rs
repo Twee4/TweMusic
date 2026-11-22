@@ -76,12 +76,21 @@ impl Morph {
             self.velocity[i] += (STIFFNESS * (target[i] - self.radii[i]) - DAMPING * self.velocity[i]) * dt;
             self.radii[i] += self.velocity[i] * dt;
         }
-        self.rotation = (self.rotation + spin * dt) % TAU;
+        if spin == 0.0 {
+            // Come to rest square on, so a rounded square does not stay tilted.
+            let quarter = TAU / 4.0;
+            let nearest = (self.rotation / quarter).round() * quarter;
+            self.rotation += (nearest - self.rotation) * (1.0 - (-dt * 8.0).exp());
+        } else {
+            self.rotation = (self.rotation + spin * dt) % TAU;
+        }
     }
 
     /// True once the outline has come to rest on `target`.
     pub fn settled(&self, target: &[f32; POINTS]) -> bool {
-        (0..POINTS).all(|i| (target[i] - self.radii[i]).abs() < 0.002 && self.velocity[i].abs() < 0.01)
+        let quarter = TAU / 4.0;
+        let square = (self.rotation - (self.rotation / quarter).round() * quarter).abs() < 0.005;
+        square && (0..POINTS).all(|i| (target[i] - self.radii[i]).abs() < 0.002 && self.velocity[i].abs() < 0.01)
     }
 
     /// Cuts the outline out of a square picture (`size` x `size` RGBA pixels): what lies outside
@@ -161,6 +170,19 @@ mod tests {
         let narrowest = radii.iter().cloned().fold(f32::MAX, f32::min);
         assert!((widest - 1.0).abs() < 1e-5);
         assert!(narrowest > 0.75 && narrowest < 0.85);
+    }
+
+    #[test]
+    fn rotation_comes_to_rest_square_on() {
+        let mut morph = Morph::new();
+        let target = squircle();
+        for _ in 0..40 {
+            morph.step(&target, 0.016, 0.6);
+        }
+        for _ in 0..400 {
+            morph.step(&target, 0.016, 0.0);
+        }
+        assert!(morph.settled(&target));
     }
 
     #[test]

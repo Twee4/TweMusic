@@ -296,6 +296,7 @@ fn sync(window: &AppWindow, engine: &Engine, art: &mut Art, key: &mut ListKey, n
     });
     window.set_time_position(clock(engine.position));
     window.set_time_duration(clock(engine.duration));
+    window.set_now_length(engine.duration.unwrap_or(0.0) as f32);
 }
 
 fn main() -> Result<(), slint::PlatformError> {
@@ -503,9 +504,11 @@ fn main() -> Result<(), slint::PlatformError> {
         let mut art_morph = shape::Morph::new();
         let mut art_key: Option<(usize, u32, u32)> = None;
         let mut art_small: Option<Vec<u8>> = None;
+        let mut seen_progress = 0.0_f32;
+        let mut seen_at = Instant::now();
         let mut wave_phase = 0.0_f32;
         let mut wave_amplitude = 0.0_f32;
-        color_timer.start(TimerMode::Repeated, Duration::from_millis(33), move || {
+        color_timer.start(TimerMode::Repeated, Duration::from_millis(16), move || {
             let now = Instant::now();
             let dt = now.duration_since(last).as_secs_f32();
             last = now;
@@ -515,24 +518,50 @@ fn main() -> Result<(), slint::PlatformError> {
             let playing = window.get_playing();
             let (target, spin) = if playing { (&cookie, 0.6) } else { (&squircle, 0.0) };
             art_morph.step(target, dt, spin);
-            let shaped = match now_pixels.borrow().as_ref() {
-                Some(pixels) if playing || !art_morph.settled(target) => {
-                    if art_key != Some((pixels.as_bytes().as_ptr() as usize, pixels.width(), pixels.height())) {
-                        art_key = Some((pixels.as_bytes().as_ptr() as usize, pixels.width(), pixels.height()));
+            // Once there is a picture it is always shown through the outline (a rounded square at
+            // rest), so nothing swaps when the song pauses; it is only redrawn while it moves.
+            let moving = playing || !art_morph.settled(target);
+            match now_pixels.borrow().as_ref() {
+                Some(pixels) => {
+                    let key = (pixels.as_bytes().as_ptr() as usize, pixels.width(), pixels.height());
+                    let changed = art_key != Some(key);
+                    if changed {
+                        art_key = Some(key);
                         art_small = square_thumbnail(pixels, ART_SIZE);
                     }
-                    art_small.as_ref().map(|rgba| {
-                        SharedPixelBuffer::<Rgba8Pixel>::clone_from_slice(&art_morph.mask(rgba, ART_SIZE), ART_SIZE, ART_SIZE)
-                    })
+                    if moving || changed {
+                        if let Some(rgba) = &art_small {
+                            let cut = art_morph.mask(rgba, ART_SIZE);
+                            window.set_now_art_shaped(Image::from_rgba8(SharedPixelBuffer::<Rgba8Pixel>::clone_from_slice(&cut, ART_SIZE, ART_SIZE)));
+                        }
+                    }
                 }
-                _ => None,
-            };
-            window.set_now_art_shaped(shaped.map(Image::from_rgba8).unwrap_or_default());
+                None => {
+                    if art_key.take().is_some() {
+                        art_small = None;
+                        window.set_now_art_shaped(Image::default());
+                    }
+                }
+            }
             // The progress bar waves while the song plays and settles flat when it pauses.
             let target_wave = if playing { 1.0 } else { 0.0 };
             wave_amplitude += (target_wave - wave_amplitude) * (1.0 - (-dt * 8.0).exp());
             wave_phase = (wave_phase + dt * 5.0) % std::f32::consts::TAU;
-            let played = window.get_seek_width() * window.get_progress().clamp(0.0, 1.0);
+            // The engine reports the position a few times a second; in between, the bar is moved on
+            // by the time that has passed so the thumb and wave glide.
+            let reported = window.get_progress();
+            if (reported - seen_progress).abs() > f32::EPSILON {
+                seen_progress = reported;
+                seen_at = now;
+            }
+            let length = window.get_now_length();
+            let smooth = if playing && length > 0.0 {
+                (seen_progress + seen_at.elapsed().as_secs_f32().min(0.6) / length).min(1.0)
+            } else {
+                seen_progress
+            };
+            window.set_smooth_progress(smooth);
+            let played = window.get_seek_width() * smooth.clamp(0.0, 1.0);
             if wave_amplitude > 0.02 && played > 6.0 {
                 window.set_wave_extent(played);
                 window.set_wave_image(wave_image(played, wave_amplitude, wave_phase));

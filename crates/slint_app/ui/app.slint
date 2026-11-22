@@ -669,6 +669,10 @@ export component AppWindow inherits Window {
     out property <length> seek-width: seek.bar-width;
     in property <bool> now-liked: false;
     in property <float> progress: 0;
+    // Length of the current song in seconds (0 when unknown); the arrow keys seek 5 s at a time.
+    in property <float> now-length: 0;
+    // The progress shown on the bar: the reported one, moved on smoothly between reports (set by Rust).
+    in property <float> smooth-progress: 0;
     in property <string> time-position: "0:00";
     in property <string> time-duration: "0:00";
 
@@ -739,8 +743,8 @@ export component AppWindow inherits Window {
     init => { keys.focus(); }
 
     // Everything sits inside one focus scope: Space plays or pauses, / searches, Escape closes
-    // the search, Ctrl+Left and Ctrl+Right go to the previous and next song, and the arrow keys
-    // seek while the progress bar has focus.
+    // the search, Left and Right seek 5 seconds, Ctrl+Left and Ctrl+Right go to the previous and
+    // next song.
     keys := FocusScope {
         key-pressed(event) => {
             if (event.text == " ") {
@@ -753,6 +757,14 @@ export component AppWindow inherits Window {
             }
             if (event.text == "/") {
                 root.open-search();
+                return accept;
+            }
+            if (!event.modifiers.control && event.text == Key.RightArrow) {
+                root.seek(clamp(root.progress + 5 / Math.max(root.now-length, 1), 0, 1));
+                return accept;
+            }
+            if (!event.modifiers.control && event.text == Key.LeftArrow) {
+                root.seek(clamp(root.progress - 5 / Math.max(root.now-length, 1), 0, 1));
                 return accept;
             }
             if (event.modifiers.control && event.text == Key.RightArrow) {
@@ -1185,7 +1197,7 @@ export component AppWindow inherits Window {
                     }
                     seek := SeekBar {
                         horizontal-stretch: 1;
-                        progress: root.progress;
+                        progress: root.smooth-progress;
                         wave-image: root.wave-image;
                         wave-extent: root.wave-extent;
                         seek(fraction) => { root.seek(fraction); }
