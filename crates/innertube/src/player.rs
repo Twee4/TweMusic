@@ -26,17 +26,25 @@ pub struct Stream {
 
 /// How long to keep asking before giving up on an address that still answers 403.
 const READY_PATIENCE: Duration = Duration::from_secs(14);
+/// How long the direct lookup keeps trying more clients before the caller falls back.
+const LOOKUP_BUDGET: Duration = Duration::from_secs(5);
 
 /// YouTube now answers 403 for the first few seconds after it hands out a stream address
 /// (yt-dlp sleeps about six seconds before downloading for this reason). A player that opens
 /// the address at once fails, so ask for two bytes until the address starts working. Returns
 /// as soon as it does; on any other answer or error it returns too and lets the player decide.
 pub fn wait_until_playable(stream: &Stream) {
+    wait_until_playable_within(stream, READY_PATIENCE);
+}
+
+/// Like `wait_until_playable`, but gives up after `patience`. Addresses that yt-dlp produced are
+/// meant for its own headers, so this probe may be refused for good while the player is fine.
+pub fn wait_until_playable_within(stream: &Stream, patience: Duration) {
     if !is_allowed_stream_url(&stream.url) {
         return;
     }
     let Ok(http) = crate::transport::http_client() else { return };
-    let deadline = Instant::now() + READY_PATIENCE;
+    let deadline = Instant::now() + patience;
     loop {
         let answer = http
             .get(&stream.url)
@@ -137,6 +145,7 @@ pub fn resolve_with(video_id: &str, profiles: &[ClientProfile]) -> Result<Stream
     if ids::youtube_music_url(video_id).is_none() {
         return Err(InnerTubeError::Api("Invalid video ID.".to_owned()));
     }
+    let started = Instant::now();
     let http = transport::http_client()?;
     let visitor_data = cached_visitor_data(&http);
 
@@ -147,6 +156,11 @@ pub fn resolve_with(video_id: &str, profiles: &[ClientProfile]) -> Result<Stream
     }
     let mut failures: Vec<(String, InnerTubeError)> = Vec::new();
     for index in clients::rotation(usable.len()) {
+        // When the first clients have all failed, going through the rest rarely helps and the
+        // person is waiting: give up and let the caller fall back.
+        if !failures.is_empty() && started.elapsed() > LOOKUP_BUDGET {
+            break;
+        }
         let client = usable[index];
         let body = request_body(client, video_id, visitor_data.as_deref());
         let attempt = transport::post_player(&http, client, &body, visitor_data.as_deref())
