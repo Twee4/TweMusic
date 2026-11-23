@@ -22,7 +22,8 @@ use crate::{
     media::Media,
     models::{Track, TrackId},
     mpv::{MpvError, MpvPlayer},
-    notifications, prefetch,
+    lyrics::Lyrics,
+    lyrics_net, notifications, prefetch,
     settings::{self, Settings},
     state::{AppState, PlaybackStatus},
     theme::ColorScheme,
@@ -108,6 +109,12 @@ pub struct Engine {
     ahead_rx: Option<(TrackId, Receiver<Result<Stream, String>>)>,
     ahead_failed: HashSet<TrackId>,
 
+    /// Lyrics of the current song, once found; `lyrics_for` is the song they were asked for.
+    pub lyrics: Option<Lyrics>,
+    pub lyrics_for: Option<TrackId>,
+    pub lyrics_loading: bool,
+    lyrics_rx: Option<Receiver<Result<Option<Lyrics>, String>>>,
+
     // Desktop integration.
     media: Option<Media>,
     media_rx: Receiver<MediaControlEvent>,
@@ -183,6 +190,10 @@ impl Engine {
             stream_cache: HashMap::new(),
             ahead_rx: None,
             ahead_failed: HashSet::new(),
+            lyrics: None,
+            lyrics_for: None,
+            lyrics_loading: false,
+            lyrics_rx: None,
             media,
             media_rx,
             media_synced: None,
@@ -603,9 +614,43 @@ impl Engine {
         self.poll_import();
         self.poll_prefetch();
         self.poll_ahead();
+        self.poll_lyrics();
         self.update_stream_refresh();
         self.poll_media();
         self.poll_tray();
+    }
+
+    /// Looks up lyrics whenever the current song changes, and collects them when they arrive.
+    fn poll_lyrics(&mut self) {
+        let current = self.state.current_track().map(|track| track.id);
+        if current != self.lyrics_for {
+            self.lyrics_for = current;
+            self.lyrics = None;
+            self.lyrics_rx = None;
+            self.lyrics_loading = false;
+            if let Some(track) = self.state.current_track().filter(|track| track.video_id.is_some()).cloned() {
+                let (tx, rx) = mpsc::channel();
+                thread::spawn(move || {
+                    let seconds = track.duration.as_secs_f64();
+                    let _ = tx.send(lyrics_net::fetch(&track.title, &track.artist, track.album.as_deref(), seconds));
+                });
+                self.lyrics_rx = Some(rx);
+                self.lyrics_loading = true;
+            }
+        }
+        let Some(rx) = &self.lyrics_rx else { return };
+        match rx.try_recv() {
+            Ok(result) => {
+                self.lyrics = result.ok().flatten();
+                self.lyrics_rx = None;
+                self.lyrics_loading = false;
+            }
+            Err(TryRecvError::Empty) => {}
+            Err(TryRecvError::Disconnected) => {
+                self.lyrics_rx = None;
+                self.lyrics_loading = false;
+            }
+        }
     }
 
     fn poll_stream(&mut self) {

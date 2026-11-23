@@ -3,6 +3,8 @@ pub mod engine;
 pub mod dynamic_color;
 pub mod import;
 pub mod library;
+pub mod lyrics;
+pub mod lyrics_net;
 pub mod media;
 pub mod models;
 pub mod notifications;
