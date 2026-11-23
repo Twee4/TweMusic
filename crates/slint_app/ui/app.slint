@@ -877,6 +877,7 @@ export component AppWindow inherits Window {
             height: 64px;
             Text {
                 text: "TweMusic";
+                horizontal-alignment: left;
                 vertical-alignment: center;
                 height: parent.height;
                 font-size: 24px;
@@ -1262,9 +1263,15 @@ export component AppWindow inherits Window {
     Rectangle {
         x: 32px + 80px + 24px;
         width: parent.width - self.x - 32px;
-        height: 24px + 128px + 64px;
+        height: 24px + 128px + 48px;
         y: parent.height - self.height;
-        background: @linear-gradient(180deg, Palette.background.transparentize(1) 0%, Palette.background.transparentize(0.1) 40%, Palette.background.transparentize(0.04) 100%);
+        // Songs stay fully visible until they come within 48 px of the player; there they fade out,
+        // and from the player's top edge down the background is solid, so nothing shows behind it.
+        background: @linear-gradient(180deg,
+            Palette.background.transparentize(1) 0%,
+            Palette.background.transparentize(0.55) 12%,
+            Palette.background 24%,
+            Palette.background 100%);
     }
 
     // Player: one glass card, the same width as the column.
