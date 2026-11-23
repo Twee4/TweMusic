@@ -1407,22 +1407,26 @@ export component AppWindow inherits Window {
             spacing: 6px;
             HorizontalLayout {
                 spacing: 14px;
-                Rectangle {
-                    width: 56px;
-                    height: 56px;
-                    // The plain art, until Rust has cut the morphing outline out of the picture.
-                    Art {
-                        visible: root.now-art-shaped.width == 0;
-                        tint: Palette.accent;
-                        source: root.now-art;
-                        border-radius: 14px;
-                    }
-                    Image {
-                        visible: root.now-art-shaped.width > 0;
-                        source: root.now-art-shaped;
+                // Centred in the row, level with the title and the buttons.
+                VerticalLayout {
+                    alignment: center;
+                    Rectangle {
                         width: 56px;
                         height: 56px;
-                        image-fit: fill;
+                        // The plain art, until Rust has cut the morphing outline out of the picture.
+                        Art {
+                            visible: root.now-art-shaped.width == 0;
+                            tint: Palette.accent;
+                            source: root.now-art;
+                            border-radius: 14px;
+                        }
+                        Image {
+                            visible: root.now-art-shaped.width > 0;
+                            source: root.now-art-shaped;
+                            width: 56px;
+                            height: 56px;
+                            image-fit: fill;
+                        }
                     }
                 }
                 VerticalLayout {
