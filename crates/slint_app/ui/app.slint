@@ -1065,7 +1065,7 @@ export component AppWindow inherits Window {
                     // Time-synced lyrics: the line being sung stays in the middle.
                     if root.lyric-lines.length > 0 && root.lyric-synced : Rectangle {
                         for line[i] in root.lyric-lines : Text {
-                            property <int> distance: abs(i - max(root.lyric-index, 0));
+                            property <int> distance: Math.abs(i - max(root.lyric-index, 0));
                             x: 0px;
                             width: parent.width;
                             height: 52px;
