@@ -580,7 +580,7 @@ component TrackRow inherits Rectangle {
             font-size: 13px;
             color: Palette.on-surface-variant;
         }
-        RoundButton {
+        if root.action-glyph != "" : RoundButton {
             glyph: root.action-glyph;
             diameter: 40px;
             icon-size: 20px;
@@ -1132,12 +1132,12 @@ export component AppWindow inherits Window {
                 }
             }
             Rectangle {
-                width: root.up-next-open && root.column-width > 760px ? clamp(300px, root.column-width * 0.32, 400px) + 16px : 0px;
+                width: root.up-next-open && root.column-width > 760px ? clamp(250px, root.column-width * 0.25, 330px) + 16px : 0px;
                 clip: true;
                 animate width { duration: 340ms; easing: cubic-bezier(0.3, 1.1, 0.64, 1); }
                 Rectangle {
                     x: 16px;
-                    width: clamp(300px, root.column-width * 0.32, 400px);
+                    width: clamp(250px, root.column-width * 0.25, 330px);
                     height: parent.height;
                     border-radius: 28px;
                     background: Palette.glass;
@@ -1171,10 +1171,7 @@ export component AppWindow inherits Window {
                             padding-bottom: 12px;
                             for entry[i] in root.up-next-rows : TrackRow {
                                 entry: entry;
-                                action-glyph: entry.liked ? Glyphs.heart-filled : Glyphs.heart;
-                                action-active: entry.liked;
                                 clicked => { root.play-up-next(i); }
-                                action => { root.like-up-next(i); }
                             }
                         }
                     }
