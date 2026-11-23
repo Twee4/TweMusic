@@ -993,7 +993,7 @@ export component AppWindow inherits Window {
         if root.screen == 4 : HorizontalLayout {
             padding-bottom: 24px + 128px + 14px;
             spacing: 0px;
-            Rectangle {
+            playview := Rectangle {
                 horizontal-stretch: 1;
                 border-radius: 28px;
                 background: Palette.glass;
@@ -1046,7 +1046,7 @@ export component AppWindow inherits Window {
                 }
 
                 // Lyrics
-                if parent.wide : Rectangle {
+                if playview.wide : Rectangle {
                     x: parent.art-x + parent.side + 32px;
                     y: 24px;
                     width: parent.width - self.x - 32px - (root.up-next-open || root.column-width <= 760px ? 0px : 40px);
