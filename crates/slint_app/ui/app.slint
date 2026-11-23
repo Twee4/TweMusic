@@ -685,6 +685,11 @@ export component AppWindow inherits Window {
     in property <image> wave-image;
     in property <image> now-art-shaped;
     in property <image> big-art;
+    in property <[string]> lyric-lines;
+    in property <bool> lyric-synced;
+    in property <string> lyric-status;
+    in-out property <int> lyric-index: -1;
+    in-out property <bool> up-next-open: true;
     in property <image> play-shape;
     in property <image> loader-shape;
     in property <float> wave-extent: 0;
@@ -983,21 +988,29 @@ export component AppWindow inherits Window {
         }
         }
 
-        // Now playing: the big artwork on the left, what is queued next on the right.
+        // Now playing: artwork and lyrics on the left, what is queued next on the right (it can
+        // be folded away to give the lyrics more room).
         if root.screen == 4 : HorizontalLayout {
-            spacing: 16px;
+            padding-bottom: 24px + 128px + 14px;
+            spacing: 0px;
             Rectangle {
                 horizontal-stretch: 1;
                 border-radius: 28px;
                 background: Palette.glass;
-                property <length> side: max(120px, min(self.height - 150px, self.width - 64px));
+                // With room to spare, the artwork sits on the left and the lyrics on the right.
+                property <bool> wide: self.width > 680px;
+                property <length> side: self.wide
+                    ? max(120px, min(self.height - 150px, (self.width - 96px) * 0.42))
+                    : max(120px, min(self.height - 150px, self.width - 64px));
+                property <length> art-x: self.wide ? 32px : (self.width - self.side) / 2;
+                property <length> art-y: self.wide ? max(24px, (self.height - self.side - 90px) / 2) : 24px;
                 Image {
                     visible: root.big-art.width > 0;
                     source: root.big-art;
                     width: parent.side;
                     height: parent.side;
-                    x: (parent.width - self.width) / 2;
-                    y: 24px;
+                    x: parent.art-x;
+                    y: parent.art-y;
                     image-fit: fill;
                 }
                 Art {
@@ -1007,14 +1020,14 @@ export component AppWindow inherits Window {
                     border-radius: 40px;
                     width: parent.side;
                     height: parent.side;
-                    x: (parent.width - self.width) / 2;
-                    y: 24px;
+                    x: parent.art-x;
+                    y: parent.art-y;
                 }
                 Text {
                     text: root.now-title;
-                    x: 24px;
-                    y: 24px + parent.side + 14px;
-                    width: parent.width - 48px;
+                    x: parent.wide ? parent.art-x : 24px;
+                    y: parent.art-y + parent.side + 14px;
+                    width: parent.wide ? parent.side : parent.width - 48px;
                     horizontal-alignment: center;
                     overflow: elide;
                     font-size: 22px;
@@ -1023,44 +1036,127 @@ export component AppWindow inherits Window {
                 }
                 Text {
                     text: root.now-artist;
-                    x: 24px;
-                    y: 24px + parent.side + 46px;
-                    width: parent.width - 48px;
+                    x: parent.wide ? parent.art-x : 24px;
+                    y: parent.art-y + parent.side + 46px;
+                    width: parent.wide ? parent.side : parent.width - 48px;
                     horizontal-alignment: center;
                     overflow: elide;
                     font-size: 15px;
                     color: Palette.on-surface-variant;
                 }
-            }
-            if root.column-width > 760px : Rectangle {
-                width: clamp(300px, root.column-width * 0.32, 400px);
-                border-radius: 28px;
-                background: Palette.glass;
-                Text {
-                    x: 20px;
-                    y: 16px;
-                    text: root.up-next-rows.length > 0 ? "Up next" : "Nothing queued yet";
-                    font-size: 18px;
-                    font-weight: 700;
-                    color: Palette.on-surface;
-                }
-                Flickable {
-                    x: 8px;
-                    y: 56px;
-                    width: parent.width - 16px;
-                    height: parent.height - 64px;
-                    content-width: self.width;
-                    VerticalLayout {
+
+                // Lyrics
+                if parent.wide : Rectangle {
+                    x: parent.art-x + parent.side + 32px;
+                    y: 24px;
+                    width: parent.width - self.x - 32px - (root.up-next-open || root.column-width <= 760px ? 0px : 40px);
+                    height: parent.height - 48px;
+                    clip: true;
+                    if root.lyric-lines.length == 0 : Text {
+                        text: root.lyric-status;
                         width: parent.width;
-                        alignment: start;
-                        spacing: 2px;
-                        padding-bottom: 12px;
-                        for entry[i] in root.up-next-rows : TrackRow {
-                            entry: entry;
-                            action-glyph: entry.liked ? Glyphs.heart-filled : Glyphs.heart;
-                            action-active: entry.liked;
-                            clicked => { root.play-up-next(i); }
-                            action => { root.like-up-next(i); }
+                        height: parent.height;
+                        horizontal-alignment: center;
+                        vertical-alignment: center;
+                        wrap: word-wrap;
+                        font-size: 16px;
+                        color: Palette.on-surface-variant;
+                    }
+                    // Time-synced lyrics: the line being sung stays in the middle.
+                    if root.lyric-lines.length > 0 && root.lyric-synced : Rectangle {
+                        for line[i] in root.lyric-lines : Text {
+                            property <int> distance: abs(i - max(root.lyric-index, 0));
+                            x: 0px;
+                            width: parent.width;
+                            height: 52px;
+                            y: parent.height / 2 - 26px + (i - max(root.lyric-index, 0)) * 52px;
+                            text: line;
+                            overflow: elide;
+                            vertical-alignment: center;
+                            font-size: i == root.lyric-index ? 26px : 20px;
+                            font-weight: i == root.lyric-index ? 700 : 500;
+                            color: i == root.lyric-index ? Palette.on-surface : Palette.on-surface-variant;
+                            opacity: i == root.lyric-index ? 1.0 : (self.distance == 1 ? 0.6 : (self.distance == 2 ? 0.42 : 0.26));
+                            animate y { duration: 380ms; easing: cubic-bezier(0.3, 1.0, 0.4, 1.0); }
+                            animate opacity { duration: 250ms; }
+                            animate font-size { duration: 250ms; }
+                        }
+                    }
+                    // Lyrics without timing: plain text to scroll through.
+                    if root.lyric-lines.length > 0 && !root.lyric-synced : Flickable {
+                        width: parent.width;
+                        height: parent.height;
+                        content-width: self.width;
+                        VerticalLayout {
+                            width: parent.width;
+                            alignment: start;
+                            padding-bottom: 24px;
+                            for line[i] in root.lyric-lines : Text {
+                                text: line;
+                                wrap: word-wrap;
+                                font-size: 18px;
+                                color: Palette.on-surface;
+                            }
+                        }
+                    }
+                }
+
+                // Brings the folded Up next panel back.
+                if !root.up-next-open && root.column-width > 760px : RoundButton {
+                    glyph: "M3 13h2v-2H3v2zm0 4h2v-2H3v2zm0-8h2V7H3v2zm4 4h14v-2H7v2zm0 4h14v-2H7v2zM7 7v2h14V7H7z";
+                    diameter: 40px;
+                    icon-size: 22px;
+                    fill: #00000000;
+                    x: parent.width - 52px;
+                    y: 12px;
+                    clicked => { root.up-next-open = true; }
+                }
+            }
+            Rectangle {
+                width: root.up-next-open && root.column-width > 760px ? clamp(300px, root.column-width * 0.32, 400px) + 16px : 0px;
+                clip: true;
+                animate width { duration: 340ms; easing: cubic-bezier(0.3, 1.1, 0.64, 1); }
+                Rectangle {
+                    x: 16px;
+                    width: clamp(300px, root.column-width * 0.32, 400px);
+                    height: parent.height;
+                    border-radius: 28px;
+                    background: Palette.glass;
+                    Text {
+                        x: 20px;
+                        y: 16px;
+                        text: root.up-next-rows.length > 0 ? "Up next" : "Nothing queued yet";
+                        font-size: 18px;
+                        font-weight: 700;
+                        color: Palette.on-surface;
+                    }
+                    RoundButton {
+                        glyph: "M10 6L8.59 7.41 13.17 12l-4.58 4.59L10 18l6-6z";
+                        diameter: 36px;
+                        icon-size: 20px;
+                        fill: #00000000;
+                        x: parent.width - 44px;
+                        y: 8px;
+                        clicked => { root.up-next-open = false; }
+                    }
+                    Flickable {
+                        x: 8px;
+                        y: 56px;
+                        width: parent.width - 16px;
+                        height: parent.height - 64px;
+                        content-width: self.width;
+                        VerticalLayout {
+                            width: parent.width;
+                            alignment: start;
+                            spacing: 2px;
+                            padding-bottom: 12px;
+                            for entry[i] in root.up-next-rows : TrackRow {
+                                entry: entry;
+                                action-glyph: entry.liked ? Glyphs.heart-filled : Glyphs.heart;
+                                action-active: entry.liked;
+                                clicked => { root.play-up-next(i); }
+                                action => { root.like-up-next(i); }
+                            }
                         }
                     }
                 }

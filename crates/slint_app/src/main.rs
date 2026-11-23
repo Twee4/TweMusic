@@ -22,6 +22,7 @@ use slint::{
 };
 use twe_music::{
     engine::{self, Action, Engine},
+    lyrics,
     models::Track,
     theme::ColorScheme,
     ytmusic,
@@ -225,6 +226,7 @@ struct ListKey {
     selected_playlist: usize,
     playlist_names: u64,
     up_next: u64,
+    lyrics: (Option<u64>, usize, bool),
 }
 
 /// Copies the engine's state into the window. Cheap values are set every time; the song lists
@@ -243,6 +245,7 @@ fn sync(window: &AppWindow, engine: &Engine, art: &mut Art, key: &mut ListKey, n
         playlist: fingerprint(&engine.playlist_tracks()),
         selected_playlist: engine.selected_playlist,
         up_next: fingerprint(&engine.up_next_tracks()),
+        lyrics: (engine.lyrics_for.map(|id| id.0), engine.lyrics.as_ref().map_or(0, |found| found.lines.len()), engine.lyrics_loading),
         playlist_names: engine.library.playlists.iter().fold(0u64, |acc, playlist| {
             acc.wrapping_mul(31).wrapping_add(playlist.name.len() as u64).wrapping_add(playlist.tracks.len() as u64 * 7)
         }),
@@ -265,6 +268,20 @@ fn sync(window: &AppWindow, engine: &Engine, art: &mut Art, key: &mut ListKey, n
         window.set_selected_playlist(engine.selected_playlist as i32);
         window.set_playlist_title(engine.library.playlists.get(engine.selected_playlist).map_or("", |playlist| playlist.name.as_str()).into());
         window.set_library_rows(entries_of(&engine.playlist_tracks(), art, |_| false));
+        window.set_lyric_lines(ModelRc::new(VecModel::from(
+            engine.lyrics.as_ref().map(|found| found.lines.iter().map(|line| SharedString::from(line.text.as_str())).collect::<Vec<_>>()).unwrap_or_default(),
+        )));
+        window.set_lyric_synced(engine.lyrics.as_ref().is_some_and(|found| found.synced));
+        window.set_lyric_status(
+            if engine.current_track().is_none() {
+                "Play a song to see its lyrics."
+            } else if engine.lyrics_loading {
+                "Looking for lyrics…"
+            } else {
+                "No lyrics found for this song."
+            }
+            .into(),
+        );
         window.set_up_next_rows(entries_of(&engine.up_next_tracks(), art, |track| engine.is_liked(track)));
         match &engine.pick {
             Some(pick) => {
@@ -648,6 +665,18 @@ fn main() -> Result<(), slint::PlatformError> {
                 window.set_wave_image(wave_image(played, wave_amplitude, wave_phase));
             } else {
                 window.set_wave_image(Image::default());
+            }
+            // The lyric line being sung follows the song.
+            let seconds = (smooth * length.max(0.0)) as f64;
+            let line = engine
+                .borrow()
+                .lyrics
+                .as_ref()
+                .filter(|found| found.synced)
+                .and_then(|found| lyrics::current_line(&found.lines, seconds))
+                .map_or(-1, |index| index as i32);
+            if window.get_lyric_index() != line {
+                window.set_lyric_index(line);
             }
             if let Some(scheme) = engine.borrow_mut().update_colors(dt) {
                 apply_palette(&window, &scheme);
