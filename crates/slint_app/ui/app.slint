@@ -1077,6 +1077,7 @@ export component AppWindow inherits Window {
                             y: parent.height / 2 - 26px + (i - max(root.lyric-index, 0)) * 52px;
                             text: line;
                             overflow: elide;
+                            horizontal-alignment: center;
                             vertical-alignment: center;
                             font-size: i == root.lyric-index ? 26px : 20px;
                             font-weight: i == root.lyric-index ? 700 : 500;
@@ -1111,6 +1112,7 @@ export component AppWindow inherits Window {
                             for line[i] in root.lyric-lines : Text {
                                 text: line;
                                 wrap: word-wrap;
+                                horizontal-alignment: center;
                                 font-size: 18px;
                                 color: Palette.on-surface;
                             }
