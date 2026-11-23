@@ -1262,9 +1262,16 @@ export component AppWindow inherits Window {
     Rectangle {
         x: 32px + 80px + 24px;
         width: parent.width - self.x - 32px;
-        height: 24px + 128px + 64px;
+        height: 24px + 128px + 150px;
         y: parent.height - self.height;
-        background: @linear-gradient(180deg, Palette.background.transparentize(1) 0%, Palette.background.transparentize(0.1) 40%, Palette.background.transparentize(0.04) 100%);
+        // Clear at the top, solid by the time it reaches the player, so nothing shows through the glass.
+        background: @linear-gradient(180deg,
+            Palette.background.transparentize(1) 0%,
+            Palette.background.transparentize(0.75) 18%,
+            Palette.background.transparentize(0.35) 36%,
+            Palette.background.transparentize(0.05) 46%,
+            Palette.background 52%,
+            Palette.background 100%);
     }
 
     // Player: one glass card, the same width as the column.
