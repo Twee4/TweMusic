@@ -687,6 +687,7 @@ export component AppWindow inherits Window {
     in property <image> big-art;
     in property <[string]> lyric-lines;
     in property <bool> lyric-synced;
+    in property <[float]> lyric-times;
     in property <string> lyric-status;
     in-out property <int> lyric-index: -1;
     in-out property <bool> up-next-open: true;
@@ -1080,6 +1081,18 @@ export component AppWindow inherits Window {
                             animate y { duration: 380ms; easing: cubic-bezier(0.3, 1.0, 0.4, 1.0); }
                             animate opacity { duration: 250ms; }
                             animate font-size { duration: 250ms; }
+                        }
+                    }
+                    // Tapping a line jumps the song to it.
+                    if root.lyric-lines.length > 0 && root.lyric-synced : Rectangle {
+                        for time[i] in root.lyric-times : TouchArea {
+                            x: 0px;
+                            width: parent.width;
+                            height: 52px;
+                            y: parent.height / 2 - 26px + (i - max(root.lyric-index, 0)) * 52px;
+                            mouse-cursor: pointer;
+                            animate y { duration: 380ms; easing: cubic-bezier(0.3, 1.0, 0.4, 1.0); }
+                            clicked => { root.seek(clamp(time / Math.max(root.now-length, 1), 0, 1)); }
                         }
                     }
                     // Lyrics without timing: plain text to scroll through.
