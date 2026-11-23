@@ -991,8 +991,12 @@ export component AppWindow inherits Window {
 
         // Now playing: artwork and lyrics on the left, what is queued next on the right (it can
         // be folded away to give the lyrics more room).
-        if root.screen == 4 : HorizontalLayout {
-            padding-bottom: 24px + 128px + 14px;
+        if root.screen == 4 : Rectangle {
+            vertical-stretch: 1;
+            HorizontalLayout {
+            width: parent.width;
+            height: parent.height;
+            padding-bottom: 14px;
             spacing: 0px;
             playview := Rectangle {
                 horizontal-stretch: 1;
@@ -1174,6 +1178,7 @@ export component AppWindow inherits Window {
                     }
                 }
             }
+        }
         }
 
         // Search results
