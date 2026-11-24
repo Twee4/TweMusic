@@ -57,7 +57,7 @@ impl Tray for TweTray {
     }
 
     fn icon_pixmap(&self) -> Vec<ksni::Icon> {
-        vec![pixmap(32), pixmap(64)]
+        vec![pixmap(24), pixmap(32), pixmap(48), pixmap(64)]
     }
 
     fn activate(&mut self, _x: i32, _y: i32) {
@@ -111,33 +111,61 @@ impl TrayHandle {
     }
 }
 
-/// A purple disc with a white music note, as ARGB32 (network byte order).
-fn pixmap(size: usize) -> ksni::Icon {
-    let scale = size as f32 / 32.0;
-    // Soft edge: coverage from the signed distance (positive inside).
-    let coverage = |distance: f32| (distance * scale + 0.5).clamp(0.0, 1.0);
+/// The app icon (a rounded purple square with two eighth notes) as ARGB32 pixels, network byte
+/// order: the same artwork as `packaging/twemusic.svg`, drawn from its shapes so it stays sharp at
+/// any size and needs no image files.
+fn render_icon(size: usize) -> Vec<u8> {
+    // Everything below is in the SVG's own 128 x 128 space.
+    let inside_square = |x: f32, y: f32| {
+        // Rounded square, corner radius 30.
+        let (cx, cy) = ((x - 64.0).abs() - 34.0, (y - 64.0).abs() - 34.0);
+        cx.max(0.0).hypot(cy.max(0.0)) + cx.max(cy).min(0.0) <= 30.0
+    };
+    let inside_note = |x: f32, y: f32| {
+        let head = |cx: f32, cy: f32| (x - cx).hypot(y - cy) <= 17.0;
+        let stem_right = (76.0..=84.0).contains(&x) && (24.0..=78.5).contains(&y);
+        let stem_left = (46.0..=54.0).contains(&x) && (34.0..=88.5).contains(&y);
+        // The beam between the two stems: from the slanted top edge down to the lower edge.
+        let beam = (46.0..=84.0).contains(&x) && {
+            let top = 34.0 - (x - 46.0) * 10.0 / 38.0;
+            let bottom = if x <= 54.0 { 45.0 } else if x >= 76.0 { 40.0 } else { 45.0 - (x - 54.0) * 5.0 / 22.0 };
+            y >= top && y <= bottom
+        };
+        head(67.0, 78.5) || head(37.0, 88.5) || stem_right || stem_left || beam
+    };
+    let lerp = |from: f32, to: f32, t: f32| from + (to - from) * t;
     let mut data = Vec::with_capacity(size * size * 4);
+    let samples = 3;
     for row in 0..size {
         for column in 0..size {
-            let x = (column as f32 + 0.5) / scale;
-            let y = (row as f32 + 0.5) / scale;
-            let disc = coverage(15.5 - ((x - 16.0).powi(2) + (y - 16.0).powi(2)).sqrt());
-            let head = coverage(4.0 - ((x - 12.5).powi(2) + (y - 21.5).powi(2)).sqrt());
-            let stem = coverage((x - 15.5).min(18.0 - x).min(y - 8.0).min(21.5 - y));
-            let flag = if (18.0..=23.0).contains(&x) && (8.0..=13.0).contains(&y) && (y - 8.0) <= (x - 18.0) + 3.0 {
-                1.0
-            } else {
-                0.0
-            };
-            let note = head.max(stem).max(flag);
-            let mix = |background: f32, foreground: f32| (background + (foreground - background) * note) as u8;
-            data.extend_from_slice(&[
-                (disc * 255.0) as u8,
-                mix(103.0, 255.0),
-                mix(80.0, 255.0),
-                mix(164.0, 255.0),
-            ]);
+            let (mut square, mut note) = (0.0_f32, 0.0_f32);
+            for sy in 0..samples {
+                for sx in 0..samples {
+                    let x = (column as f32 + (sx as f32 + 0.5) / samples as f32) * 128.0 / size as f32;
+                    let y = (row as f32 + (sy as f32 + 0.5) / samples as f32) * 128.0 / size as f32;
+                    if inside_square(x, y) {
+                        square += 1.0;
+                        if inside_note(x, y) {
+                            note += 1.0;
+                        }
+                    }
+                }
+            }
+            let total = (samples * samples) as f32;
+            let (square, note) = (square / total, if square > 0.0 { note / square } else { 0.0 });
+            // The diagonal gradient #6750a4 -> #2b1f4a, with the note #eaddff on top.
+            let t = ((column + row) as f32 + 1.0) / (2.0 * size as f32);
+            let background = [lerp(103.0, 43.0, t), lerp(80.0, 31.0, t), lerp(164.0, 74.0, t)];
+            let ink = [234.0, 221.0, 255.0];
+            data.push((square * 255.0).round() as u8);
+            for channel in 0..3 {
+                data.push(lerp(background[channel], ink[channel], note).round() as u8);
+            }
         }
     }
-    ksni::Icon { width: size as i32, height: size as i32, data }
+    data
+}
+
+fn pixmap(size: usize) -> ksni::Icon {
+    ksni::Icon { width: size as i32, height: size as i32, data: render_icon(size) }
 }
