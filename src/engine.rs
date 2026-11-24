@@ -133,6 +133,8 @@ pub struct Engine {
     /// Whether the dark colour scheme is the one in use (the front end sets it from the theme
     /// setting and the desktop's light or dark preference).
     pub dark: bool,
+    /// The desktop's own light or dark preference, which the tray icon follows.
+    system_dark: bool,
     art_url: Option<String>,
     art_rx: Option<Receiver<(String, Option<f32>)>>,
     scheme_changed: bool,
@@ -209,6 +211,7 @@ impl Engine {
             announced: None,
             scheme: Transition::new(),
             dark: true,
+            system_dark: true,
             art_url: None,
             art_rx: None,
             scheme_changed: false,
@@ -1064,6 +1067,7 @@ impl Engine {
             let tx = self.tray_tx.clone();
             match TrayHandle::spawn(tx, || {}) {
                 Ok(handle) => {
+                    handle.set_dark_panel(self.system_dark);
                     self.tray = Some(handle);
                     self.tray_synced = None;
                 }
@@ -1113,6 +1117,16 @@ impl Engine {
     /// Follows the current song's artwork: fetches its dominant hue when the song changes, then
     /// eases the colours towards the matching scheme. `dt` is the time since the last call, in
     /// seconds. Returns the dark colour scheme to draw with when it changed.
+    /// Tells the engine whether the desktop prefers a dark look, so the tray icon stays visible.
+    pub fn set_system_dark(&mut self, dark: bool) {
+        if self.system_dark != dark {
+            self.system_dark = dark;
+            if let Some(tray) = &self.tray {
+                tray.set_dark_panel(dark);
+            }
+        }
+    }
+
     /// Switches between the light and dark colour scheme.
     pub fn set_dark(&mut self, dark: bool) {
         if self.dark != dark {
