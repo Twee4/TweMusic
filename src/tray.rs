@@ -75,9 +75,9 @@ impl Tray for TweTray {
         vec![
             item("Show TweMusic", "multimedia-player", TrayCommand::Show),
             MenuItem::Separator,
+            item("Previous", "media-skip-backward", TrayCommand::Previous),
             item(label, icon, TrayCommand::PlayPause),
             item("Next", "media-skip-forward", TrayCommand::Next),
-            item("Previous", "media-skip-backward", TrayCommand::Previous),
             MenuItem::Separator,
             item("Quit", "application-exit", TrayCommand::Quit),
         ]
