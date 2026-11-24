@@ -714,6 +714,7 @@ fn main() -> Result<(), slint::PlatformError> {
                 _ => window.get_system_dark(),
             };
             engine.borrow_mut().set_dark(wanted_dark);
+            engine.borrow_mut().set_system_dark(window.get_system_dark());
             if let Some(scheme) = engine.borrow_mut().update_colors(dt) {
                 apply_palette(&window, &scheme, wanted_dark);
             }
