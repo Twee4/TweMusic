@@ -316,7 +316,7 @@ impl Engine {
             return;
         };
         if let Some((stream, issued)) = self.cached_stream(track.id) {
-            eprintln!("[timing] {video_id}: stream was looked up in advance");
+            crate::debug_log!("[timing] {video_id}: stream was looked up in advance");
             self.stream_rx = None;
             self.pending_track = None;
             self.start_stream(track, &stream);
@@ -351,7 +351,7 @@ impl Engine {
 
     fn start_stream(&mut self, track: &Track, stream: &Stream) {
         let result = self.ensure_player().and_then(|player| player.load_stream(stream));
-        eprintln!("[timing] handed {} to mpv: {}", track.title, if result.is_ok() { "ok" } else { "failed" });
+        crate::debug_log!("[timing] handed {} to mpv: {}", track.title, if result.is_ok() { "ok" } else { "failed" });
         match result {
             Ok(()) => {
                 if !self.state.tracks.iter().any(|existing| existing.id == track.id) {
@@ -401,7 +401,7 @@ impl Engine {
         // The next track is usually looked up and queued in mpv already: switch to it at once.
         if forward && self.state.playback == PlaybackStatus::Playing && self.queued_next.is_some_and(|(queued, _)| queued == id) {
             let jumped = self.mpv.as_mut().is_some_and(|player| player.advance_to_queued().is_ok());
-            eprintln!("[timing] Next: jumped to the queued song: {jumped}");
+            crate::debug_log!("[timing] Next: jumped to the queued song: {jumped}");
             if jumped {
                 self.finish_advance(id);
                 return;
@@ -776,7 +776,7 @@ impl Engine {
                 }
             }
             if let Some(since) = self.loading_since {
-                eprintln!("[timing] mpv opened the stream and started playing after {:.1}s", since.elapsed().as_secs_f32());
+                crate::debug_log!("[timing] mpv opened the stream and started playing after {:.1}s", since.elapsed().as_secs_f32());
             }
             self.played_something = true;
             self.loading_since = None;
@@ -1150,8 +1150,8 @@ impl Engine {
                     thread::spawn(move || {
                         let hue = dynamic_color::hue_from_url(&url);
                         match hue {
-                            Some(hue) => eprintln!("[colour] artwork hue {:.0} degrees ({url})", hue.to_degrees().rem_euclid(360.0)),
-                            None => eprintln!("[colour] no hue from the artwork (greyscale, download failed or host not allowed): {url}"),
+                            Some(hue) => crate::debug_log!("[colour] artwork hue {:.0} degrees ({url})", hue.to_degrees().rem_euclid(360.0)),
+                            None => crate::debug_log!("[colour] no hue from the artwork (greyscale, download failed or host not allowed): {url}"),
                         }
                         let _ = tx.send((url, hue));
                     });

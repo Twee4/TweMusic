@@ -48,7 +48,7 @@ pub fn resolve(video_id: &str, browser: Option<&str>) -> Result<Stream, String> 
     // Fresh addresses are refused for a few seconds; wait here, off the UI thread, so the
     // player only ever opens an address that works.
     twe_innertube::wait_until_playable_within(&stream, std::time::Duration::from_secs(4));
-    eprintln!(
+    crate::debug_log!(
         "[timing] {video_id}: lookup {:.1}s, wait for address {:.1}s",
         looked_up.as_secs_f32(),
         (started.elapsed() - looked_up).as_secs_f32()
@@ -61,7 +61,7 @@ fn find_stream(video_id: &str, browser: Option<&str>) -> Result<Stream, String> 
     if let Some(browser) = browser {
         let blocked = BLOCKED_UNTIL.lock().ok().and_then(|slot| *slot).is_some_and(|until| Instant::now() < until);
         if blocked {
-            eprintln!("[timing] using yt-dlp (the direct lookup is paused after a bot check)");
+            crate::debug_log!("[timing] using yt-dlp (the direct lookup is paused after a bot check)");
             return via_ytdlp(video_id, browser);
         }
     }
@@ -71,7 +71,7 @@ fn find_stream(video_id: &str, browser: Option<&str>) -> Result<Stream, String> 
             if let Ok(mut slot) = BLOCKED_UNTIL.lock() {
                 *slot = Some(Instant::now() + SKIP_DIRECT_FOR);
             }
-            eprintln!("[timing] direct lookup hit the bot check; falling back to yt-dlp");
+            crate::debug_log!("[timing] direct lookup hit the bot check; falling back to yt-dlp");
             via_ytdlp(video_id, browser.unwrap_or_default())
         }
         Err(error) => Err(error.to_string()),
