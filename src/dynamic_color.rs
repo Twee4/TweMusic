@@ -187,19 +187,26 @@ const MAX_ART_BYTES: usize = 8 * 1024 * 1024;
 /// The dominant hue (OKLab radians) of pixels, weighted by how colourful they are, or `None` for
 /// greyscale artwork. Takes RGB triples.
 pub fn dominant_hue(pixels: impl IntoIterator<Item = [u8; 3]>) -> Option<f32> {
+    let pixels: Vec<[u8; 3]> = pixels.into_iter().collect();
+    // Dark or muted artwork fails the strict pass; a second, gentler pass still finds its tint.
+    hue_with(&pixels, 0.12, 0.96, MIN_CHROMA, MIN_COLORFULNESS)
+        .or_else(|| hue_with(&pixels, 0.04, 0.99, 0.008, 0.002))
+}
+
+fn hue_with(pixels: &[[u8; 3]], min_l: f32, max_l: f32, min_chroma: f32, min_share: f32) -> Option<f32> {
     let mut weight = [0.0_f32; HUE_BINS];
     let mut sin_sum = [0.0_f32; HUE_BINS];
     let mut cos_sum = [0.0_f32; HUE_BINS];
     let mut count = 0_u32;
-    for [r, g, b] in pixels {
+    for &[r, g, b] in pixels {
         count += 1;
         let lab = linear_to_oklab([r, g, b].map(|v| srgb_to_linear(f32::from(v) / 255.0)));
         // Near-black and near-white pixels have an unreliable hue.
-        if !(0.12..=0.96).contains(&lab[0]) {
+        if !(min_l..=max_l).contains(&lab[0]) {
             continue;
         }
         let chroma = lab[1].hypot(lab[2]);
-        if chroma < MIN_CHROMA {
+        if chroma < min_chroma {
             continue;
         }
         let hue = lab[2].atan2(lab[1]);
@@ -216,7 +223,7 @@ pub fn dominant_hue(pixels: impl IntoIterator<Item = [u8; 3]>) -> Option<f32> {
         .copied()
         .enumerate()
         .max_by(|a, b| a.1.total_cmp(&b.1))?;
-    if best_weight / (count as f32) < MIN_COLORFULNESS {
+    if best_weight / (count as f32) < min_share {
         return None;
     }
     Some(sin_sum[best].atan2(cos_sum[best]))
