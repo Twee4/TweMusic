@@ -1,6 +1,8 @@
 // TweMusic in Slint. The window only draws: all data and playback come from the Rust side
 // (twe_music::engine), which fills the properties below and handles the callbacks.
 
+import { Palette as SystemPalette } from "std-widgets.slint";
+
 struct Song {
     title: string,
     artist: string,
@@ -22,6 +24,16 @@ export global Palette {
     in property <color> glass: #ffffff14;
     in property <color> glass-hover: #ffffff26;
     in property <color> glass-solid: #2a2438;
+    // Light or dark, and the colour for text and icons that sit on the accent colour.
+    in property <bool> dark: true;
+    in property <color> on-accent: #eaddff;
+    // Colours that depend on the mode, for icons and layers drawn on the glass.
+    out property <color> ink: dark ? #e8e0f0 : #2b2733;
+    out property <color> ink-soft: dark ? #cfc6dc : #5a5365;
+    out property <color> state-layer: dark ? #ffffff1a : #0000001a;
+    out property <color> faint: dark ? #ffffff0a : #0000000a;
+    out property <color> outline: dark ? #938f99 : #79747e;
+    out property <color> liked: dark ? #ffb4c8 : #b3261e;
 }
 
 struct Entry {
@@ -49,7 +61,7 @@ component Icon inherits Path {
     viewbox-width: 24;
     viewbox-height: 24;
     commands: glyph;
-    fill: #e8e0f0;
+    fill: Palette.ink;
 }
 
 // Lets its parent be reached with Tab and used with Space or Enter, and draws a focus ring.
@@ -68,7 +80,7 @@ component Focusable inherits Rectangle {
     Rectangle {
         border-radius: root.ring-radius;
         border-width: fs.has-focus ? 3px : 0px;
-        border-color: #ffffff;
+        border-color: Palette.on-surface;
         animate border-width { duration: 100ms; }
     }
 }
@@ -97,7 +109,7 @@ component RailItem inherits Rectangle {
                 Icon {
                     glyph: root.glyph;
                     size: 22px;
-                    fill: root.selected ? #ffffff : #cfc6dc;
+                    fill: root.selected ? Palette.on-accent : Palette.ink-soft;
                 }
             }
         }
@@ -106,7 +118,7 @@ component RailItem inherits Rectangle {
             horizontal-alignment: center;
             font-size: 12px;
             font-weight: root.selected ? 700 : 500;
-            color: root.selected ? #ffffff : #cfc6dc;
+            color: root.selected ? Palette.on-accent : Palette.ink-soft;
         }
     }
     Focusable {
@@ -140,7 +152,7 @@ component RoundButton inherits Rectangle {
     in property <length> diameter: 48px;
     in property <length> icon-size: 24px;
     in property <color> fill: Palette.glass-hover;
-    in property <color> ink: #e8e0f0;
+    in property <color> ink: Palette.ink;
     // Corner radius at rest; it squeezes while pressed and springs back. The curve approximates
     // Material 3 Expressive's fast spatial spring (damping 0.6, stiffness 800: about 9% overshoot).
     in property <length> rest-radius: diameter / 2;
@@ -197,7 +209,7 @@ component QuickCard inherits Rectangle {
     animate background { duration: 120ms; }
     Rectangle {
         border-radius: root.border-radius;
-        background: ta.pressed ? #ffffff1a : #00000000;
+        background: ta.pressed ? Palette.state-layer : #00000000;
         animate background { duration: 80ms; }
     }
     HorizontalLayout {
@@ -353,19 +365,19 @@ component PickCard inherits Rectangle {
                 text: root.song.title;
                 font-size: 20px;
                 font-weight: 700;
-                color: #ffffff;
+                color: Palette.on-accent;
                 overflow: elide;
             }
             Text {
                 text: root.song.artist;
                 font-size: 14px;
-                color: #e8def8;
+                color: Palette.on-accent.transparentize(0.1);
                 overflow: elide;
             }
             Text {
                 text: root.why;
                 font-size: 12px;
-                color: #cfc6dc;
+                color: Palette.on-accent.transparentize(0.25);
             }
         }
         Rectangle {
@@ -449,7 +461,7 @@ component SeekBar inherits Rectangle {
         border-radius: 6px;
         background: Palette.primary;
         border-width: fs.has-focus ? 3px : 0px;
-        border-color: #ffffff;
+        border-color: Palette.on-surface;
     }
     TouchArea {
         clicked => { root.seek(clamp(self.mouse-x / self.width, 0, 1)); }
@@ -477,7 +489,7 @@ component TextButton inherits Rectangle {
     animate background { duration: 120ms; }
     Rectangle {
         border-radius: root.border-radius;
-        background: ta.pressed ? #ffffff1a : #00000000;
+        background: ta.pressed ? Palette.state-layer : #00000000;
         animate background { duration: 80ms; }
     }
     HorizontalLayout {
@@ -488,7 +500,7 @@ component TextButton inherits Rectangle {
             vertical-alignment: center;
             font-size: 14px;
             font-weight: 600;
-            color: #ffffff;
+            color: root.destructive ? #ffffff : (root.filled ? Palette.on-accent : Palette.on-surface);
         }
     }
     Focusable {
@@ -512,7 +524,7 @@ component Chip inherits Rectangle {
     animate background { duration: 150ms; easing: ease-out; }
     Rectangle {
         border-radius: root.border-radius;
-        background: ta.pressed ? #ffffff1a : #00000000;
+        background: ta.pressed ? Palette.state-layer : #00000000;
         animate background { duration: 80ms; }
     }
     HorizontalLayout {
@@ -589,7 +601,7 @@ component TrackRow inherits Rectangle {
     animate background { duration: 120ms; }
     Rectangle {
         border-radius: root.border-radius;
-        background: ta.pressed ? #ffffff1a : #00000000;
+        background: ta.pressed ? Palette.state-layer : #00000000;
         animate background { duration: 80ms; }
     }
     Focusable {
@@ -636,7 +648,7 @@ component TrackRow inherits Rectangle {
             diameter: 40px;
             icon-size: 20px;
             fill: #00000000;
-            ink: root.action-active ? #ffb4c8 : #cfc6dc;
+            ink: root.action-active ? Palette.liked : Palette.ink-soft;
             clicked => { root.action(); }
         }
     }
@@ -680,9 +692,9 @@ component SwitchRow inherits Rectangle {
                 Rectangle {
                     height: 32px;
                     border-radius: 16px;
-                    background: root.on ? Palette.accent : #2b2638;
+                    background: root.on ? Palette.accent : Palette.glass-solid;
                     border-width: root.on ? 0px : 2px;
-                    border-color: #938f99;
+                    border-color: Palette.outline;
                     animate background { duration: 150ms; }
                     Rectangle {
                         property <length> thumb: sta.pressed ? 28px : (root.on ? 24px : 16px);
@@ -691,7 +703,7 @@ component SwitchRow inherits Rectangle {
                         border-radius: self.thumb / 2;
                         x: (root.on ? parent.width - 16px : 16px) - self.thumb / 2;
                         y: (parent.height - self.thumb) / 2;
-                        background: root.on ? #ffffff : #938f99;
+                        background: root.on ? Palette.on-accent : Palette.outline;
                         animate x, width, height, y, border-radius { duration: 300ms; easing: cubic-bezier(0.3, 1.3, 0.64, 1); }
                         animate background { duration: 150ms; }
                         Icon {
@@ -819,6 +831,10 @@ export component AppWindow inherits Window {
     in-out property <bool> set-notifications: true;
     in-out property <bool> set-tray: false;
     in-out property <bool> set-dynamic-color: true;
+    // 0 follow the desktop, 1 light, 2 dark.
+    in-out property <int> theme-mode: 0;
+    out property <bool> system-dark: SystemPalette.color-scheme != ColorScheme.light;
+    callback theme-chosen(int);
     callback settings-changed(string, bool);
 
     // The page column: right of the rail (32 + 80 + 24), with a 32 margin on the right.
@@ -987,7 +1003,7 @@ export component AppWindow inherits Window {
                     glyph: Glyphs.search;
                     diameter: 44px;
                     fill: #00000000;
-                    ink: root.search-open || root.screen == 3 ? #ffffff : #e8e0f0;
+                    ink: root.search-open ? Palette.on-surface : (root.screen == 3 ? Palette.on-accent : Palette.ink);
                     clicked => {
                         if (root.search-open && root.query != "") {
                             root.search(root.query);
@@ -1007,7 +1023,7 @@ export component AppWindow inherits Window {
             vertical-stretch: 1;
             border-radius: 28px;
             clip: true;
-            background: #ffffff0a;
+            background: Palette.faint;
             VerticalLayout {
                 padding-left: 16px;
                 padding-right: 16px;
@@ -1446,6 +1462,53 @@ export component AppWindow inherits Window {
                     on <=> root.set-dynamic-color;
                     toggled(value) => { root.settings-changed("dynamic-color", value); }
                 }
+                Rectangle {
+                    height: 72px;
+                    border-radius: 20px;
+                    background: Palette.glass;
+                    HorizontalLayout {
+                        padding-left: 20px;
+                        padding-right: 20px;
+                        spacing: 16px;
+                        VerticalLayout {
+                            alignment: center;
+                            horizontal-stretch: 1;
+                            Text {
+                                text: "Theme";
+                                font-size: 16px;
+                                font-weight: 600;
+                                color: Palette.on-surface;
+                            }
+                            Text {
+                                text: "Follow the desktop, or always light or dark.";
+                                overflow: elide;
+                                font-size: 13px;
+                                color: Palette.on-surface-variant;
+                            }
+                        }
+                        VerticalLayout {
+                            alignment: center;
+                            HorizontalLayout {
+                                spacing: 8px;
+                                Chip {
+                                    label: "System";
+                                    selected: root.theme-mode == 0;
+                                    clicked => { root.theme-chosen(0); }
+                                }
+                                Chip {
+                                    label: "Light";
+                                    selected: root.theme-mode == 1;
+                                    clicked => { root.theme-chosen(1); }
+                                }
+                                Chip {
+                                    label: "Dark";
+                                    selected: root.theme-mode == 2;
+                                    clicked => { root.theme-chosen(2); }
+                                }
+                            }
+                        }
+                    }
+                }
             }
         }
         }
@@ -1524,7 +1587,7 @@ export component AppWindow inherits Window {
                             ? "M12 21.35l-1.45-1.32C5.4 15.36 2 12.28 2 8.5 2 5.42 4.42 3 7.5 3c1.74 0 3.41.81 4.5 2.09C13.09 3.81 14.76 3 16.5 3 19.58 3 22 5.42 22 8.5c0 3.78-3.4 6.86-8.55 11.54L12 21.35z"
                             : "M16.5 3c-1.74 0-3.41.81-4.5 2.09C10.91 3.81 9.24 3 7.5 3 4.42 3 2 5.42 2 8.5c0 3.78 3.4 6.86 8.55 11.54L12 21.35l1.45-1.32C18.6 15.36 22 12.28 22 8.5 22 5.42 19.58 3 16.5 3zm-4.4 15.55l-.1.1-.1-.1C7.14 14.24 4 11.39 4 8.5 4 6.5 5.5 5 7.5 5c1.54 0 3.04.99 3.57 2.36h1.87C13.46 5.99 14.96 5 16.5 5c2 0 3.5 1.5 3.5 3.5 0 2.89-3.14 5.74-7.9 10.05z";
                         fill: #00000000;
-                        ink: root.now-liked ? #ffb4c8 : #e8e0f0;
+                        ink: root.now-liked ? Palette.liked : Palette.ink;
                         diameter: 40px;
                         icon-size: 22px;
                         clicked => { root.toggle-like(); }
@@ -1550,7 +1613,7 @@ export component AppWindow inherits Window {
                         loader-image: root.loader-shape;
                         busy: root.loading;
                         fill: Palette.accent;
-                        ink: #ffffff;
+                        ink: Palette.on-accent;
                         clicked => { root.toggle-pause(); }
                     }
                 }
@@ -1599,7 +1662,7 @@ export component AppWindow inherits Window {
         width: min(parent.width - 64px, 520px);
         height: 48px;
         border-radius: 14px;
-        background: #3a3347;
+        background: Palette.glass-solid;
         Text {
             text: root.notice;
             font-size: 14px;

@@ -13,6 +13,8 @@ pub struct Settings {
     pub tray: bool,
     /// Tint the app with colours taken from the album art of the current song.
     pub dynamic_color: bool,
+    /// "system" (follow the desktop), "light" or "dark".
+    pub theme: String,
     /// Advanced, hand-edited only: when YouTube's bot check blocks the direct lookup, yt-dlp is
     /// used with no sign-in. Set this to a browser name from `ytdlp::BROWSERS` to have yt-dlp read
     /// that browser's signed-in session instead. Unset (or unknown) means no sign-in.
@@ -21,7 +23,7 @@ pub struct Settings {
 
 impl Default for Settings {
     fn default() -> Self {
-        Self { notifications: true, tray: false, dynamic_color: true, ytdlp_browser: None }
+        Self { notifications: true, tray: false, dynamic_color: true, theme: "system".into(), ytdlp_browser: None }
     }
 }
 

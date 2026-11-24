@@ -130,6 +130,9 @@ pub struct Engine {
 
     // Dynamic colour from the album art.
     scheme: Transition,
+    /// Whether the dark colour scheme is the one in use (the front end sets it from the theme
+    /// setting and the desktop's light or dark preference).
+    pub dark: bool,
     art_url: Option<String>,
     art_rx: Option<Receiver<(String, Option<f32>)>>,
     scheme_changed: bool,
@@ -205,6 +208,7 @@ impl Engine {
             window_hidden: false,
             announced: None,
             scheme: Transition::new(),
+            dark: true,
             art_url: None,
             art_rx: None,
             scheme_changed: false,
@@ -1109,6 +1113,14 @@ impl Engine {
     /// Follows the current song's artwork: fetches its dominant hue when the song changes, then
     /// eases the colours towards the matching scheme. `dt` is the time since the last call, in
     /// seconds. Returns the dark colour scheme to draw with when it changed.
+    /// Switches between the light and dark colour scheme.
+    pub fn set_dark(&mut self, dark: bool) {
+        if self.dark != dark {
+            self.dark = dark;
+            self.scheme_changed = true;
+        }
+    }
+
     pub fn update_colors(&mut self, dt: f32) -> Option<ColorScheme> {
         let wanted = if self.settings.dynamic_color {
             self.state.current_track().and_then(|track| track.thumbnail_url.clone())
@@ -1139,7 +1151,11 @@ impl Engine {
         }
         let changed = self.scheme.step(dt) || self.scheme_changed;
         self.scheme_changed = false;
-        changed.then(|| self.scheme.current().1)
+        let dark = self.dark;
+        changed.then(|| {
+            let (light_scheme, dark_scheme) = self.scheme.current();
+            if dark { dark_scheme } else { light_scheme }
+        })
     }
 
     /// Stops the tray icon and playback. Call once when the app quits.
