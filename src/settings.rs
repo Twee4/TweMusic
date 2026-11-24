@@ -58,16 +58,16 @@ mod tests {
 
     #[test]
     fn defaults_and_partial_files() {
-        assert_eq!(Settings::default(), Settings { notifications: true, tray: false, dynamic_color: true, ytdlp_browser: None });
+        assert_eq!(Settings::default(), Settings { notifications: true, tray: false, dynamic_color: true, theme: "system".into(), ytdlp_browser: None });
         let partial: Settings = serde_json::from_str(r#"{ "tray": true }"#).unwrap();
-        assert_eq!(partial, Settings { notifications: true, tray: true, dynamic_color: true, ytdlp_browser: None });
+        assert_eq!(partial, Settings { notifications: true, tray: true, dynamic_color: true, theme: "system".into(), ytdlp_browser: None });
     }
 
     #[test]
     fn round_trip_and_bad_file() {
         let dir = std::env::temp_dir().join(format!("twe-music-settings-{}", std::process::id()));
         let path = dir.join("settings.json");
-        let settings = Settings { notifications: false, tray: true, dynamic_color: false, ytdlp_browser: Some("firefox".to_owned()) };
+        let settings = Settings { notifications: false, tray: true, dynamic_color: false, theme: "dark".into(), ytdlp_browser: Some("firefox".to_owned()) };
         settings.save_to(&path).unwrap();
         assert_eq!(Settings::load_from(&path), settings);
         fs::write(&path, "not json").unwrap();
