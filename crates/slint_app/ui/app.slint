@@ -228,12 +228,14 @@ component QuickCard inherits Rectangle {
 
 component ShelfCard inherits Rectangle {
     in property <Song> song;
+    // Set by the shelf, which owns the pointer so it can scroll smoothly.
+    in property <bool> down;
     callback clicked();
     // No swell here: these cards sit in a row that is swept sideways, and a card that grows
     // under the finger would jolt the whole row at the start of every swipe.
     width: 156px;
     height: 220px;
-    opacity: ta.pressed ? 0.9 : 1.0;
+    opacity: root.down ? 0.9 : 1.0;
     animate opacity { duration: 120ms; }
     VerticalLayout {
         spacing: 6px;
@@ -241,7 +243,7 @@ component ShelfCard inherits Rectangle {
             height: 156px;
             tint: root.song.tint;
             source: root.song.art;
-            border-radius: ta.pressed ? 30px : 14px;
+            border-radius: root.down ? 30px : 14px;
         }
         Text {
             text: root.song.title;
@@ -261,9 +263,6 @@ component ShelfCard inherits Rectangle {
         ring-radius: 12px;
         activated => { root.clicked(); }
     }
-    ta := TouchArea {
-        clicked => { root.clicked(); }
-    }
 }
 
 component Shelf inherits VerticalLayout {
@@ -277,13 +276,123 @@ component Shelf inherits VerticalLayout {
         font-weight: 700;
         color: Palette.on-surface;
     }
-    Flickable {
+    // The row scrolls by its own rules instead of Slint's Flickable: it follows the pointer from
+    // the first pixel, glides to a stop with a controlled friction, and stretches and springs
+    // back at the ends. A tap without movement picks the song under the pointer.
+    strip := Rectangle {
         height: 220px;
-        HorizontalLayout {
-            spacing: 14px;
+        clip: true;
+        property <float> step: 170;
+        property <float> max-px: max(0, root.songs.length * 170 - 14 - self.width / 1px);
+        // How far the row is scrolled, in pixels (may pass either end while it is stretched).
+        property <float> pos: 0;
+        property <float> vel: 0;
+        property <float> prev: 0;
+        property <float> start-pos: 0;
+        property <bool> dragging: false;
+        property <int> down-index: -1;
+
+        function index-at(x: length) -> int {
+            return Math.floor((x / 1px + strip.pos) / strip.step);
+        }
+        function advance() {
+            if (strip.pos < 0) {
+                strip.vel = strip.vel + (-300 * strip.pos - 30 * strip.vel) * 0.016;
+                strip.pos = strip.pos + strip.vel * 0.016;
+                if (Math.abs(strip.pos) < 0.4 && Math.abs(strip.vel) < 6) {
+                    strip.pos = 0;
+                    strip.vel = 0;
+                }
+            } else if (strip.pos > strip.max-px) {
+                strip.vel = strip.vel + (-300 * (strip.pos - strip.max-px) - 30 * strip.vel) * 0.016;
+                strip.pos = strip.pos + strip.vel * 0.016;
+                if (Math.abs(strip.pos - strip.max-px) < 0.4 && Math.abs(strip.vel) < 6) {
+                    strip.pos = strip.max-px;
+                    strip.vel = 0;
+                }
+            } else {
+                strip.vel = strip.vel * 0.94;
+                strip.pos = strip.pos + strip.vel * 0.016;
+                if (Math.abs(strip.vel) < 12) {
+                    strip.vel = 0;
+                }
+            }
+        }
+
+        Rectangle {
+            x: -strip.pos * 1px;
+            width: root.songs.length * 170px;
             for song[i] in root.songs : ShelfCard {
+                x: i * 170px;
                 song: song;
+                down: strip.down-index == i;
                 clicked => { root.picked(i); }
+            }
+        }
+
+        // Runs the glide and the spring, and measures the speed of the hand while dragging.
+        Timer {
+            interval: 16ms;
+            running: strip.dragging || strip.vel != 0 || strip.pos < 0 || strip.pos > strip.max-px;
+            triggered => {
+                if (strip.dragging) {
+                    strip.vel = strip.vel * 0.5 + ((strip.pos - strip.prev) / 0.016) * 0.5;
+                    strip.prev = strip.pos;
+                } else {
+                    strip.advance();
+                }
+            }
+        }
+
+        drag := TouchArea {
+            pointer-event(event) => {
+                if (event.kind == PointerEventKind.down && event.button == PointerEventButton.left) {
+                    strip.vel = 0;
+                    strip.dragging = false;
+                    strip.start-pos = strip.pos;
+                    strip.prev = strip.pos;
+                    strip.down-index = strip.index-at(drag.mouse-x);
+                } else if (event.kind == PointerEventKind.up && event.button == PointerEventButton.left) {
+                    if (strip.dragging) {
+                        strip.dragging = false;
+                        strip.vel = Math.max(-3500, Math.min(3500, strip.vel));
+                    } else if (strip.down-index >= 0 && strip.down-index < root.songs.length
+                        && (drag.mouse-x / 1px + strip.pos) - strip.down-index * strip.step < 156) {
+                        root.picked(strip.down-index);
+                    }
+                    strip.down-index = -1;
+                } else if (event.kind == PointerEventKind.cancel) {
+                    strip.dragging = false;
+                    strip.down-index = -1;
+                }
+            }
+            moved => {
+                if (self.pressed) {
+                    let dx = (self.mouse-x - self.pressed-x) / 1px;
+                    if (!strip.dragging && Math.abs(dx) > 4) {
+                        strip.dragging = true;
+                        strip.down-index = -1;
+                    }
+                    if (strip.dragging) {
+                        let raw = strip.start-pos - dx;
+                        // Past either end the row resists, like a stretched band.
+                        if (raw < 0) {
+                            strip.pos = raw * 0.4;
+                        } else if (raw > strip.max-px) {
+                            strip.pos = strip.max-px + (raw - strip.max-px) * 0.4;
+                        } else {
+                            strip.pos = raw;
+                        }
+                    }
+                }
+            }
+            scroll-event(event) => {
+                if (Math.abs(event.delta-x) > Math.abs(event.delta-y)) {
+                    strip.vel = 0;
+                    strip.pos = Math.max(0, Math.min(strip.max-px, strip.pos - event.delta-x / 1px));
+                    return accept;
+                }
+                return reject;
             }
         }
     }
