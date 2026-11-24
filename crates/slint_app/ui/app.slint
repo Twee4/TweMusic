@@ -73,21 +73,21 @@ component Focusable inherits Rectangle {
     }
 }
 
-// The soft glow in the corners of a song container (tinted by the album colour).
+// The soft glow in the corners of the page container (tinted by the album colour).
 component CardGlow inherits Rectangle {
     Rectangle {
-        x: parent.width - 80px;
-        y: -50px;
-        width: 150px;
-        height: 150px;
-        background: @radial-gradient(circle, Palette.primary.with-alpha(0.20) 0%, #00000000 70%);
+        x: parent.width - 220px;
+        y: -140px;
+        width: 360px;
+        height: 360px;
+        background: @radial-gradient(circle, Palette.primary.with-alpha(0.16) 0%, #00000000 70%);
     }
     Rectangle {
-        x: -60px;
-        y: parent.height - 70px;
-        width: 130px;
-        height: 130px;
-        background: @radial-gradient(circle, Palette.primary.with-alpha(0.12) 0%, #00000000 70%);
+        x: -180px;
+        y: parent.height - 220px;
+        width: 360px;
+        height: 360px;
+        background: @radial-gradient(circle, Palette.primary.with-alpha(0.10) 0%, #00000000 70%);
     }
 }
 
@@ -209,14 +209,10 @@ component QuickCard inherits Rectangle {
     height: ta.pressed ? 62px : 56px;
     animate height { duration: 300ms; easing: cubic-bezier(0.3, 1.3, 0.64, 1); }
     // Square-ish at rest, rounder under the finger, with the springy Expressive motion.
-    border-radius: ta.pressed ? 24px : 16px;
-    clip: true;
-    border-width: 1px;
-    border-color: #ffffff24;
+    border-radius: ta.pressed ? 22px : 12px;
     animate border-radius { duration: 260ms; easing: cubic-bezier(0.3, 1.3, 0.64, 1); }
     background: ta.has-hover ? Palette.glass-hover : Palette.glass;
     animate background { duration: 120ms; }
-    CardGlow { }
     Rectangle {
         border-radius: root.border-radius;
         background: ta.pressed ? #ffffff1a : #00000000;
@@ -251,26 +247,18 @@ component QuickCard inherits Rectangle {
 component ShelfCard inherits Rectangle {
     in property <Song> song;
     callback clicked();
-    width: ta.pressed ? 184px : 172px;
-    height: 240px;
-    border-radius: ta.pressed ? 28px : 18px;
-    animate border-radius { duration: 300ms; easing: cubic-bezier(0.3, 1.3, 0.64, 1); }
-    clip: true;
-    background: Palette.glass;
-    border-width: 1px;
-    border-color: #ffffff24;
+    width: ta.pressed ? 168px : 156px;
+    height: 220px;
     animate width { duration: 300ms; easing: cubic-bezier(0.3, 1.3, 0.64, 1); }
     opacity: ta.pressed ? 0.9 : 1.0;
     animate opacity { duration: 120ms; }
-    CardGlow { }
     VerticalLayout {
-        padding: 8px;
         spacing: 6px;
         Art {
             height: 156px;
             tint: root.song.tint;
             source: root.song.art;
-            border-radius: ta.pressed ? 26px : 12px;
+            border-radius: ta.pressed ? 30px : 14px;
         }
         Text {
             text: root.song.title;
@@ -287,7 +275,7 @@ component ShelfCard inherits Rectangle {
         }
     }
     Focusable {
-        ring-radius: 18px;
+        ring-radius: 12px;
         activated => { root.clicked(); }
     }
     ta := TouchArea {
@@ -307,7 +295,7 @@ component Shelf inherits VerticalLayout {
         color: Palette.on-surface;
     }
     Flickable {
-        height: 244px;
+        height: 220px;
         HorizontalLayout {
             spacing: 14px;
             for song[i] in root.songs : ShelfCard {
@@ -580,14 +568,10 @@ component TrackRow inherits Rectangle {
     callback action();
     height: ta.pressed ? 70px : 64px;
     animate height { duration: 300ms; easing: cubic-bezier(0.3, 1.3, 0.64, 1); }
-    border-radius: ta.pressed ? 24px : 16px;
-    clip: true;
-    border-width: 1px;
-    border-color: #ffffff24;
+    border-radius: ta.pressed ? 24px : 14px;
     animate border-radius { duration: 260ms; easing: cubic-bezier(0.3, 1.3, 0.64, 1); }
-    background: ta.has-hover ? Palette.glass-hover : Palette.glass;
+    background: ta.has-hover ? Palette.glass : #00000000;
     animate background { duration: 120ms; }
-    CardGlow { }
     Rectangle {
         border-radius: root.border-radius;
         background: ta.pressed ? #ffffff1a : #00000000;
@@ -823,7 +807,7 @@ export component AppWindow inherits Window {
     callback settings-changed(string, bool);
 
     // The page column: right of the rail (32 + 80 + 24), with a 32 margin on the right.
-    property <length> column-width: root.width - 136px - 32px;
+    property <length> column-width: root.width - 136px - 32px - 32px;
 
     function open-search() {
         if (root.screen != 3) {
@@ -1002,6 +986,20 @@ export component AppWindow inherits Window {
             }
         }
 
+        // One big rounded container holds whatever page is open; content scrolls inside it and
+        // is clipped by its rounded corners above the player.
+        Rectangle {
+            vertical-stretch: 1;
+            border-radius: 28px;
+            clip: true;
+            background: #ffffff0a;
+            border-width: 1px;
+            border-color: #ffffff24;
+            CardGlow { }
+            VerticalLayout {
+                padding-left: 16px;
+                padding-right: 16px;
+                padding-top: 12px;
         if root.screen == 0 : Rectangle {
             vertical-stretch: 1;
             Flickable {
@@ -1236,7 +1234,7 @@ export component AppWindow inherits Window {
                         VerticalLayout {
                             width: parent.width;
                             alignment: start;
-                            spacing: 6px;
+                            spacing: 2px;
                             padding-bottom: 12px;
                             for entry[i] in root.up-next-rows : TrackRow {
                                 entry: entry;
@@ -1266,7 +1264,7 @@ export component AppWindow inherits Window {
                 VerticalLayout {
                     width: root.column-width;
                 alignment: start;
-                    spacing: 6px;
+                    spacing: 2px;
                     padding-bottom: 12px;
                     for entry[i] in root.results : TrackRow {
                         entry: entry;
@@ -1438,6 +1436,8 @@ export component AppWindow inherits Window {
                 }
             }
         }
+        }
+            }
         }
 
         // Room for the player, which floats at the bottom: the page ends just above it.
