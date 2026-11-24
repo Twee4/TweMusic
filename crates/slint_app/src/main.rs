@@ -271,6 +271,9 @@ fn sync(window: &AppWindow, engine: &Engine, art: &mut Art, key: &mut ListKey, n
         window.set_lyric_lines(ModelRc::new(VecModel::from(
             engine.lyrics.as_ref().map(|found| found.lines.iter().map(|line| SharedString::from(line.text.as_str())).collect::<Vec<_>>()).unwrap_or_default(),
         )));
+        window.set_lyric_times(ModelRc::new(VecModel::from(
+            engine.lyrics.as_ref().filter(|found| found.synced).map(|found| found.lines.iter().map(|line| line.time as f32).collect::<Vec<_>>()).unwrap_or_default(),
+        )));
         window.set_lyric_synced(engine.lyrics.as_ref().is_some_and(|found| found.synced));
         window.set_lyric_status(
             if engine.current_track().is_none() {
