@@ -47,6 +47,18 @@ makepkg -si
 This builds the app, installs `twemusic` into `/usr/bin` and adds a launcher and icon, so you can
 start it from the application menu. It pulls in `mpv` and `yt-dlp`.
 
+To install the latest version straight from GitHub, without cloning the repository, use the
+`twemusic-git` package file in `packaging/arch/aur`:
+
+```bash
+mkdir twemusic-git && cd twemusic-git
+curl -O https://raw.githubusercontent.com/Twee4/TweMusic/main/packaging/arch/aur/PKGBUILD
+makepkg -si
+```
+
+Run the same commands again to update it. The build needs about 1.5 GB of disk space; add `-c`
+(`makepkg -sic`) to remove the build files afterwards.
+
 TweMusic needs MPV:
 
 ```bash

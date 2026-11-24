@@ -1,0 +1,39 @@
+# Maintainer: Twee4
+# Builds the latest TweMusic straight from GitHub, so it works from anywhere:
+#   mkdir twemusic-git && cd twemusic-git && curl -O <this file's raw URL> && makepkg -si
+# (or `makepkg -sic` to also delete the build files afterwards, which take about 1.5 GB)
+pkgname=twemusic-git
+pkgver=0.1.0.r0.g0000000
+pkgrel=1
+pkgdesc='Native Linux music player with a glass Material 3 interface (Slint), latest from git'
+arch=('x86_64' 'aarch64')
+url='https://github.com/Twee4/TweMusic'
+license=('MIT')
+depends=('mpv' 'yt-dlp' 'fontconfig' 'libxkbcommon' 'libglvnd' 'dbus')
+makedepends=('cargo' 'git' 'pkgconf')
+optdepends=('deno: lets yt-dlp solve YouTube challenges when the direct lookup is blocked'
+            'nodejs: alternative to deno for yt-dlp')
+provides=('twemusic')
+conflicts=('twemusic')
+options=('!lto')
+source=("TweMusic::git+https://github.com/Twee4/TweMusic.git")
+sha256sums=('SKIP')
+
+pkgver() {
+  cd "$srcdir/TweMusic"
+  # 0.1.0.r<number of commits>.g<short hash>
+  printf '0.1.0.r%s.g%s' "$(git rev-list --count HEAD)" "$(git rev-parse --short HEAD)"
+}
+
+build() {
+  cd "$srcdir/TweMusic"
+  export CARGO_TARGET_DIR="$srcdir/target"
+  cargo build --release -p twe_slint
+}
+
+package() {
+  cd "$srcdir/TweMusic"
+  install -Dm755 "$srcdir/target/release/twe_slint" "$pkgdir/usr/bin/twemusic"
+  install -Dm644 packaging/twemusic.desktop "$pkgdir/usr/share/applications/twemusic.desktop"
+  install -Dm644 packaging/twemusic.svg "$pkgdir/usr/share/icons/hicolor/scalable/apps/twemusic.svg"
+}

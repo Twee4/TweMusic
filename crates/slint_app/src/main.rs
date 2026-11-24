@@ -145,8 +145,10 @@ macro_rules! col {
 }
 
 /// Gives the window the colours of `scheme` (they follow the album art of the current song).
-fn apply_palette(window: &AppWindow, scheme: &ColorScheme) {
+fn apply_palette(window: &AppWindow, scheme: &ColorScheme, dark: bool) {
     let palette = window.global::<Palette>();
+    palette.set_dark(dark);
+    palette.set_on_accent(col!(scheme.on_primary_container));
     palette.set_background(col!(scheme.surface));
     palette.set_accent(col!(scheme.primary_container));
     palette.set_primary(col!(scheme.primary));
@@ -159,8 +161,10 @@ fn apply_palette(window: &AppWindow, scheme: &ColorScheme) {
         let c = scheme.secondary_container;
         Color::from_argb_u8(alpha, c.r(), c.g(), c.b())
     };
-    palette.set_glass(tint(115));
-    palette.set_glass_hover(tint(180));
+    // Cards need a stronger tint on a light background to stand out from it.
+    let (glass, hover) = if dark { (115, 180) } else { (200, 240) };
+    palette.set_glass(tint(glass));
+    palette.set_glass_hover(tint(hover));
     palette.set_glass_solid(col!(scheme.surface_container_high));
 }
 
@@ -489,6 +493,28 @@ fn main() -> Result<(), slint::PlatformError> {
         window.set_set_notifications(settings.notifications);
         window.set_set_tray(settings.tray);
         window.set_set_dynamic_color(settings.dynamic_color);
+        window.set_theme_mode(match settings.theme.as_str() {
+            "light" => 1,
+            "dark" => 2,
+            _ => 0,
+        });
+    }
+    {
+        let engine = Rc::clone(&engine);
+        let weak = window.as_weak();
+        window.on_theme_chosen(move |mode| {
+            engine.borrow_mut().update_settings(|settings| {
+                settings.theme = match mode {
+                    1 => "light",
+                    2 => "dark",
+                    _ => "system",
+                }
+                .to_owned();
+            });
+            if let Some(window) = weak.upgrade() {
+                window.set_theme_mode(mode);
+            }
+        });
     }
 
     // Every 250 ms: collect finished background work, follow mpv, and refresh the window.
@@ -681,8 +707,15 @@ fn main() -> Result<(), slint::PlatformError> {
             if window.get_lyric_index() != line {
                 window.set_lyric_index(line);
             }
+            // Light or dark: the setting, or the desktop's preference when it says "system".
+            let wanted_dark = match engine.borrow().settings.theme.as_str() {
+                "light" => false,
+                "dark" => true,
+                _ => window.get_system_dark(),
+            };
+            engine.borrow_mut().set_dark(wanted_dark);
             if let Some(scheme) = engine.borrow_mut().update_colors(dt) {
-                apply_palette(&window, &scheme);
+                apply_palette(&window, &scheme, wanted_dark);
             }
         });
     }
