@@ -73,24 +73,6 @@ component Focusable inherits Rectangle {
     }
 }
 
-// The soft glow in the corners of the page container (tinted by the album colour).
-component CardGlow inherits Rectangle {
-    Rectangle {
-        x: parent.width - 220px;
-        y: -140px;
-        width: 360px;
-        height: 360px;
-        background: @radial-gradient(circle, Palette.primary.with-alpha(0.16) 0%, #00000000 70%);
-    }
-    Rectangle {
-        x: -180px;
-        y: parent.height - 220px;
-        width: 360px;
-        height: 360px;
-        background: @radial-gradient(circle, Palette.primary.with-alpha(0.10) 0%, #00000000 70%);
-    }
-}
-
 component RailItem inherits Rectangle {
     in property <string> glyph;
     in property <string> label;
@@ -995,7 +977,6 @@ export component AppWindow inherits Window {
             background: #ffffff0a;
             border-width: 1px;
             border-color: #ffffff24;
-            CardGlow { }
             VerticalLayout {
                 padding-left: 16px;
                 padding-right: 16px;
