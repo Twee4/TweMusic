@@ -161,8 +161,10 @@ fn apply_palette(window: &AppWindow, scheme: &ColorScheme, dark: bool) {
         let c = scheme.secondary_container;
         Color::from_argb_u8(alpha, c.r(), c.g(), c.b())
     };
-    palette.set_glass(tint(115));
-    palette.set_glass_hover(tint(180));
+    // Cards need a stronger tint on a light background to stand out from it.
+    let (glass, hover) = if dark { (115, 180) } else { (200, 240) };
+    palette.set_glass(tint(glass));
+    palette.set_glass_hover(tint(hover));
     palette.set_glass_solid(col!(scheme.surface_container_high));
 }
 

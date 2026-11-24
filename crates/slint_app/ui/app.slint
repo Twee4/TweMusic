@@ -31,7 +31,7 @@ export global Palette {
     out property <color> ink: dark ? #e8e0f0 : #2b2733;
     out property <color> ink-soft: dark ? #cfc6dc : #5a5365;
     out property <color> state-layer: dark ? #ffffff1a : #0000001a;
-    out property <color> faint: dark ? #ffffff0a : #0000000a;
+    out property <color> faint: dark ? #ffffff0a : #6750a414;
     out property <color> outline: dark ? #938f99 : #79747e;
     out property <color> liked: dark ? #ffb4c8 : #b3261e;
 }
@@ -1612,8 +1612,9 @@ export component AppWindow inherits Window {
                         shape-image: root.play-shape;
                         loader-image: root.loader-shape;
                         busy: root.loading;
-                        fill: Palette.accent;
-                        ink: Palette.on-accent;
+                        // A stronger purple in light mode, where the pale container is too quiet.
+                        fill: Palette.dark ? Palette.accent : Palette.primary;
+                        ink: Palette.dark ? Palette.on-accent : Palette.on-primary;
                         clicked => { root.toggle-pause(); }
                     }
                 }
