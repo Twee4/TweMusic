@@ -229,16 +229,15 @@ component QuickCard inherits Rectangle {
 component ShelfCard inherits Rectangle {
     in property <Song> song;
     callback clicked();
-    // No swell here: these cards sit in a row that is swept sideways, and a card that grows
-    // under the finger would jolt the whole row at the start of every swipe.
+    // The shelf sets the width so a row of cards fills the page; the cover stays square.
     width: 156px;
-    height: 220px;
+    height: self.width + 64px;
     opacity: ta.pressed ? 0.9 : 1.0;
     animate opacity { duration: 120ms; }
     VerticalLayout {
         spacing: 6px;
         Art {
-            height: 156px;
+            height: root.width;
             tint: root.song.tint;
             source: root.song.art;
             border-radius: ta.pressed ? 30px : 14px;
@@ -306,12 +305,16 @@ component Shelf inherits VerticalLayout {
     strip := Rectangle {
         property <int> cols: max(1, Math.floor((self.width / 1px + 14) / 170));
         property <int> rows: Math.ceil(root.songs.length / self.cols);
-        height: root.open ? max(220px, self.rows * 234px - 14px) : 220px;
+        // The cards share the row's width evenly, so there is no empty strip at the right end.
+        property <length> card-w: (self.width - (self.cols - 1) * 14px) / self.cols;
+        property <length> card-h: self.card-w + 64px;
+        height: root.open ? max(self.card-h, self.rows * (self.card-h + 14px) - 14px) : self.card-h;
         animate height { duration: 380ms; easing: cubic-bezier(0.3, 1.1, 0.64, 1); }
         clip: true;
         for song[i] in root.songs : ShelfCard {
-            x: Math.mod(i, strip.cols) * 170px;
-            y: Math.floor(i / strip.cols) * 234px;
+            x: Math.mod(i, strip.cols) * (strip.card-w + 14px);
+            y: Math.floor(i / strip.cols) * (strip.card-h + 14px);
+            width: strip.card-w;
             song: song;
             clicked => { root.picked(i); }
         }
