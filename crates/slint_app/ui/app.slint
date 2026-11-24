@@ -67,6 +67,7 @@ component Icon inherits Path {
 // Lets its parent be reached with Tab and used with Space or Enter, and draws a focus ring.
 component Focusable inherits Rectangle {
     in property <length> ring-radius: 12px;
+    out property <bool> focused: fs.has-focus;
     callback activated();
     fs := FocusScope {
         key-pressed(event) => {
@@ -240,6 +241,7 @@ component QuickCard inherits Rectangle {
 
 component ShelfCard inherits Rectangle {
     in property <Song> song;
+    out property <bool> focused: card-focus.focused;
     callback clicked();
     // The shelf sets the width so a row of cards fills the page; the cover stays square.
     width: 156px;
@@ -268,7 +270,7 @@ component ShelfCard inherits Rectangle {
             color: Palette.on-surface-variant;
         }
     }
-    Focusable {
+    card-focus := Focusable {
         ring-radius: 12px;
         activated => { root.clicked(); }
     }
@@ -281,6 +283,8 @@ component Shelf inherits VerticalLayout {
     in property <string> heading;
     in property <[Song]> songs;
     callback picked(int);
+    // Asks the page to scroll so a focused card (its top on screen, and its height) is in view.
+    callback reveal(length, length);
     // Only the songs that fit in one row show; "See all" opens the rest as a grid below them.
     in-out property <bool> open: false;
     spacing: 8px;
@@ -329,6 +333,13 @@ component Shelf inherits VerticalLayout {
             width: strip.card-w;
             song: song;
             clicked => { root.picked(i); }
+            changed focused => {
+                if (self.focused) {
+                    // Tabbing to a card in a hidden row opens the shelf, then scrolls to it.
+                    if (i >= strip.cols) { root.open = true; }
+                    root.reveal(self.absolute-position.y, self.height);
+                }
+            }
         }
     }
 }
@@ -796,6 +807,18 @@ export component AppWindow inherits Window {
     in property <[float]> lyric-times;
     in property <string> lyric-status;
     in-out property <int> lyric-index: -1;
+
+    // Where Home's content should sit so a card (top `top` and height `h`, in window coordinates)
+    // is fully inside the visible area that starts at `view-top` and is `view-h` tall.
+    pure function scrolled-y(vy: length, top: length, h: length, view-top: length, view-h: length) -> length {
+        if (top - view-top < 0px) {
+            return min(0px, vy - (top - view-top) + 8px);
+        } else if (top - view-top + h > view-h) {
+            return min(0px, vy - (top - view-top + h - view-h) - 8px);
+        } else {
+            return vy;
+        }
+    }
     in-out property <bool> up-next-open: true;
     in property <image> play-shape;
     in property <image> loader-shape;
@@ -1057,7 +1080,7 @@ export component AppWindow inherits Window {
                 padding-top: 12px;
         if root.screen == 0 : Rectangle {
             vertical-stretch: 1;
-            Flickable {
+            home-scroll := Flickable {
                 width: parent.width;
                 height: parent.height;
             content-width: root.column-width;
@@ -1091,16 +1114,19 @@ export component AppWindow inherits Window {
                     heading: "More like today's pick";
                     songs: root.more;
                     picked(i) => { root.play-more(i); }
+                    reveal(y, h) => { home-scroll.viewport-y = root.scrolled-y(home-scroll.viewport-y, y, h, home-scroll.absolute-position.y, home-scroll.height); }
                 }
                 if root.recent.length > 0 : Shelf {
                     heading: "Recently played";
                     songs: root.recent;
                     picked(i) => { root.play-recent(i); }
+                    reveal(y, h) => { home-scroll.viewport-y = root.scrolled-y(home-scroll.viewport-y, y, h, home-scroll.absolute-position.y, home-scroll.height); }
                 }
                 if root.liked.length > 0 : Shelf {
                     heading: "Liked songs";
                     songs: root.liked;
                     picked(i) => { root.play-liked(i); }
+                    reveal(y, h) => { home-scroll.viewport-y = root.scrolled-y(home-scroll.viewport-y, y, h, home-scroll.absolute-position.y, home-scroll.height); }
                 }
                 if !root.has-pick && root.recent.length == 0 && root.liked.length == 0 : Text {
                     text: "Finding something for you…";
@@ -1231,12 +1257,25 @@ export component AppWindow inherits Window {
                             width: parent.width;
                             alignment: start;
                             padding-bottom: 24px;
-                            for line[i] in root.lyric-lines : Text {
-                                text: line;
-                                wrap: word-wrap;
-                                horizontal-alignment: center;
-                                font-size: 18px;
-                                color: Palette.on-surface;
+                            // These lines have no timing, so a tap jumps to where the line falls in the
+                            // song if the lyrics were spread evenly: close, not exact.
+                            for line[i] in root.lyric-lines : Rectangle {
+                                VerticalLayout {
+                                    padding-top: 4px;
+                                    padding-bottom: 4px;
+                                    Text {
+                                        text: line;
+                                        wrap: word-wrap;
+                                        horizontal-alignment: center;
+                                        font-size: 18px;
+                                        color: plain-ta.has-hover ? Palette.primary : Palette.on-surface;
+                                        animate color { duration: 120ms; }
+                                    }
+                                }
+                                plain-ta := TouchArea {
+                                    mouse-cursor: pointer;
+                                    clicked => { root.seek(clamp(0.04 + 0.9 * (i + 0.5) / root.lyric-lines.length, 0, 1)); }
+                                }
                             }
                         }
                     }
