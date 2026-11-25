@@ -1219,26 +1219,28 @@ export component AppWindow inherits Window {
                             opacity: self.current ? 1.0 : (self.distance == 1 ? 0.6 : (self.distance == 2 ? 0.4 : 0.22));
                             animate y { duration: 420ms; easing: cubic-bezier(0.3, 1.0, 0.4, 1.0); }
                             animate opacity { duration: 280ms; }
-                            // A soft glow behind the line being sung, fading in and out as lines change.
-                            Rectangle {
-                                width: min(base.preferred-width + 64px, row.width);
-                                height: parent.height - 12px;
-                                x: (parent.width - self.width) / 2;
-                                y: 6px;
-                                border-radius: 28px;
-                                background: Palette.primary.with-alpha(0.10);
-                                drop-shadow-blur: 36px;
-                                drop-shadow-color: Palette.primary.with-alpha(0.38);
-                                opacity: row.current ? 1.0 : 0.0;
-                                visible: row.current || self.opacity > 0.01;
-                                animate opacity { duration: 360ms; easing: ease-out; }
-                            }
                             // Not shown: the width the line would take at full size.
                             measure := Text {
                                 text: line == "" ? "♪" : line;
                                 font-size: 26px;
                                 font-weight: 700;
                                 visible: false;
+                            }
+                            // A soft bloom around the line being sung: faint copies nudged in four directions.
+                            for d in [{ dx: -2, dy: 0 }, { dx: 2, dy: 0 }, { dx: 0, dy: -2 }, { dx: 0, dy: 2 }] : Text {
+                                x: d.dx * 1px;
+                                y: d.dy * 1px;
+                                width: row.width;
+                                height: row.height;
+                                text: base.text;
+                                overflow: elide;
+                                horizontal-alignment: center;
+                                vertical-alignment: center;
+                                font-size: base.font-size;
+                                font-weight: base.font-weight;
+                                color: Palette.primary;
+                                opacity: row.current ? 0.22 : 0.0;
+                                animate opacity { duration: 360ms; easing: ease-out; }
                             }
                             base := Text {
                                 width: parent.width;
