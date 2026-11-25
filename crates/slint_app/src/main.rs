@@ -236,6 +236,7 @@ struct ListKey {
 /// only when something they show has changed.
 fn sync(window: &AppWindow, engine: &Engine, art: &mut Art, key: &mut ListKey, now_pixels: &mut Option<Pixels>) {
     window.set_greeting(engine::greeting(engine.hour).into());
+    window.set_shuffle(engine.state.shuffle);
 
     let next = ListKey {
         history_len: engine.library.history.len(),
@@ -458,6 +459,10 @@ fn main() -> Result<(), slint::PlatformError> {
     {
         let engine = Rc::clone(&engine);
         window.on_play_up_next(move |index| engine.borrow_mut().play_up_next(index.max(0) as usize));
+    }
+    {
+        let engine = Rc::clone(&engine);
+        window.on_toggle_shuffle(move || engine.borrow_mut().toggle_shuffle());
     }
     {
         let engine = Rc::clone(&engine);

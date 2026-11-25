@@ -155,8 +155,10 @@ impl Engine {
         let (media_tx, media_rx) = mpsc::channel();
         let media = Media::new(media_tx, || {});
         let (tray_tx, tray_rx) = mpsc::channel();
+        let mut state = AppState::new();
+        state.shuffle = settings.shuffle;
         let mut engine = Self {
-            state: AppState::new(),
+            state,
             library,
             settings,
             library_path,
@@ -265,6 +267,13 @@ impl Engine {
             self.state.play_track(track.id);
             self.play_remote(&track);
         }
+    }
+
+    /// Switches shuffle on or off and remembers the choice.
+    pub fn toggle_shuffle(&mut self) {
+        let on = !self.state.shuffle;
+        self.state.set_shuffle(on);
+        self.update_settings(|settings| settings.shuffle = on);
     }
 
     pub fn is_playing(&self) -> bool {

@@ -806,6 +806,7 @@ export component AppWindow inherits Window {
     in property <[float]> lyric-times;
     in property <string> lyric-status;
     in-out property <int> lyric-index: -1;
+    in property <bool> shuffle: false;
     // How far through the current line the song is (0 to 1), for the colour sweep.
     in property <float> lyric-progress: 0;
 
@@ -876,6 +877,7 @@ export component AppWindow inherits Window {
     callback remove-track(int);
     callback play-library(int);
     callback play-up-next(int);
+    callback toggle-shuffle();
     callback like-up-next(int);
 
     // Settings
@@ -1335,6 +1337,17 @@ export component AppWindow inherits Window {
                         font-size: 18px;
                         font-weight: 700;
                         color: Palette.on-surface;
+                    }
+                    // Plays the queue in random order; lit while shuffle is on.
+                    RoundButton {
+                        glyph: "M10.59 9.17L5.41 4 4 5.41l5.17 5.17 1.42-1.41zM14.5 4l2.04 2.04L4 18.59 5.41 20 17.96 7.46 20 9.5V4h-5.5zm.33 9.41l-1.41 1.41 3.13 3.13L14.5 20H20v-5.5l-2.04 2.04-3.13-3.13z";
+                        diameter: 36px;
+                        icon-size: 20px;
+                        fill: root.shuffle ? Palette.accent : #00000000;
+                        ink: root.shuffle ? Palette.on-accent : Palette.ink;
+                        x: parent.width - 84px;
+                        y: 8px;
+                        clicked => { root.toggle-shuffle(); }
                     }
                     RoundButton {
                         glyph: "M10 6L8.59 7.41 13.17 12l-4.58 4.59L10 18l6-6z";
