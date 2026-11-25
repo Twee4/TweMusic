@@ -172,7 +172,6 @@ fn apply_palette(window: &AppWindow, scheme: &ColorScheme, dark: bool) {
 const ART_SIZE: u32 = 112;
 const BUTTON_SIZE: u32 = 96;
 /// Side of the picture for the big artwork on the Now playing page.
-const BIG_SIZE: u32 = 360;
 
 /// `pixels` cropped to a square in the middle and shrunk to `size` x `size` RGBA bytes.
 fn square_thumbnail(pixels: &Pixels, size: u32) -> Option<Vec<u8>> {
@@ -578,9 +577,6 @@ fn main() -> Result<(), slint::PlatformError> {
         let mut button_drawn = false;
         let mut art_key: Option<(usize, u32, u32)> = None;
         let mut art_small: Option<Vec<u8>> = None;
-        let mut art_big: Option<Vec<u8>> = None;
-        let mut art_big_key: Option<(usize, u32, u32)> = None;
-        let mut big_dirty = true;
         let mut seen_progress = 0.0_f32;
         let mut seen_at = Instant::now();
         let mut wave_phase = 0.0_f32;
@@ -643,33 +639,6 @@ fn main() -> Result<(), slint::PlatformError> {
                 loader_clock = 0.0;
                 window.set_loader_shape(Image::default());
             }
-            // The Now playing page shows the same morphing artwork large; it is only cut while open.
-            if window.get_screen() == 4 {
-                match now_pixels.borrow().as_ref() {
-                    Some(pixels) => {
-                        let key = (pixels.as_bytes().as_ptr() as usize, pixels.width(), pixels.height());
-                        if art_big_key != Some(key) {
-                            art_big_key = Some(key);
-                            art_big = square_thumbnail(pixels, BIG_SIZE);
-                            big_dirty = true;
-                        }
-                        if moving || big_dirty {
-                            if let Some(rgba) = &art_big {
-                                let cut = art_morph.mask(rgba, BIG_SIZE, 1.0);
-                                window.set_big_art(Image::from_rgba8(SharedPixelBuffer::<Rgba8Pixel>::clone_from_slice(&cut, BIG_SIZE, BIG_SIZE)));
-                            }
-                            big_dirty = false;
-                        }
-                    }
-                    None => {
-                        art_big_key = None;
-                        art_big = None;
-                        window.set_big_art(Image::default());
-                    }
-                }
-            } else {
-                big_dirty = true;
-            }
             // The progress bar waves while the song plays and settles flat when it pauses.
             let target_wave = if playing { 1.0 } else { 0.0 };
             wave_amplitude += (target_wave - wave_amplitude) * (1.0 - (-dt * 8.0).exp());
@@ -707,6 +676,21 @@ fn main() -> Result<(), slint::PlatformError> {
             if window.get_lyric_index() != line {
                 window.set_lyric_index(line);
             }
+            // How far through that line the song is: lines end before the next one starts.
+            let progress = engine
+                .borrow()
+                .lyrics
+                .as_ref()
+                .filter(|found| found.synced)
+                .and_then(|found| {
+                    let index = usize::try_from(line).ok()?;
+                    let start = found.lines.get(index)?.time;
+                    let gap = found.lines.get(index + 1).map_or(6.0, |next| next.time - start);
+                    let sung_for = (gap * 0.85).clamp(1.0, 8.0);
+                    Some(((seconds - start) / sung_for).clamp(0.0, 1.0) as f32)
+                })
+                .unwrap_or(0.0);
+            window.set_lyric_progress(progress);
             // Light or dark: the setting, or the desktop's preference when it says "system".
             let wanted_dark = match engine.borrow().settings.theme.as_str() {
                 "light" => false,

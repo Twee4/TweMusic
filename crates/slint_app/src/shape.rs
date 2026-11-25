@@ -83,7 +83,7 @@ pub fn polygon(sides: u32, rounding: f32) -> [f32; POINTS] {
 
 /// The "slanted" shape: a rounded square leaning to the right.
 pub fn slanted() -> [f32; POINTS] {
-    const LEAN: f32 = 0.32;
+    const LEAN: f32 = 0.2;
     const SHARPNESS: f32 = 3.4;
     let mut radii = [1.0; POINTS];
     for (i, radius) in radii.iter_mut().enumerate() {

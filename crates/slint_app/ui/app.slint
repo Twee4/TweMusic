@@ -801,12 +801,13 @@ export component AppWindow inherits Window {
     in property <bool> loading: false;
     in property <image> wave-image;
     in property <image> now-art-shaped;
-    in property <image> big-art;
     in property <[string]> lyric-lines;
     in property <bool> lyric-synced;
     in property <[float]> lyric-times;
     in property <string> lyric-status;
     in-out property <int> lyric-index: -1;
+    // How far through the current line the song is (0 to 1), for the colour sweep.
+    in property <float> lyric-progress: 0;
 
     // Where Home's content should sit so a card (top `top` and height `h`, in window coordinates)
     // is fully inside the visible area that starts at `view-top` and is `view-h` tall.
@@ -1114,19 +1115,19 @@ export component AppWindow inherits Window {
                     heading: "More like today's pick";
                     songs: root.more;
                     picked(i) => { root.play-more(i); }
-                    reveal(y, h) => { home-scroll.viewport-y = root.scrolled-y(home-scroll.viewport-y, y, h, home-scroll.absolute-position.y, home-scroll.height); }
+                    reveal(y, h) => { home-scroll.content-y = root.scrolled-y(home-scroll.content-y, y, h, home-scroll.absolute-position.y, home-scroll.height); }
                 }
                 if root.recent.length > 0 : Shelf {
                     heading: "Recently played";
                     songs: root.recent;
                     picked(i) => { root.play-recent(i); }
-                    reveal(y, h) => { home-scroll.viewport-y = root.scrolled-y(home-scroll.viewport-y, y, h, home-scroll.absolute-position.y, home-scroll.height); }
+                    reveal(y, h) => { home-scroll.content-y = root.scrolled-y(home-scroll.content-y, y, h, home-scroll.absolute-position.y, home-scroll.height); }
                 }
                 if root.liked.length > 0 : Shelf {
                     heading: "Liked songs";
                     songs: root.liked;
                     picked(i) => { root.play-liked(i); }
-                    reveal(y, h) => { home-scroll.viewport-y = root.scrolled-y(home-scroll.viewport-y, y, h, home-scroll.absolute-position.y, home-scroll.height); }
+                    reveal(y, h) => { home-scroll.content-y = root.scrolled-y(home-scroll.content-y, y, h, home-scroll.absolute-position.y, home-scroll.height); }
                 }
                 if !root.has-pick && root.recent.length == 0 && root.liked.length == 0 : Text {
                     text: "Finding something for you…";
@@ -1153,24 +1154,15 @@ export component AppWindow inherits Window {
                 // With room to spare, the artwork sits on the left and the lyrics on the right.
                 property <bool> wide: self.width > 680px;
                 property <length> side: self.wide
-                    ? max(120px, min(self.height - 150px, (self.width - 96px) * 0.42))
-                    : max(120px, min(self.height - 150px, self.width - 64px));
+                    ? max(120px, min(self.height - 190px, (self.width - 96px) * 0.34))
+                    : max(120px, min(self.height - 190px, (self.width - 64px) * 0.8));
                 property <length> art-x: self.wide ? 32px : (self.width - self.side) / 2;
                 property <length> art-y: self.wide ? max(24px, (self.height - self.side - 90px) / 2) : 24px;
-                Image {
-                    visible: root.big-art.width > 0;
-                    source: root.big-art;
-                    width: parent.side;
-                    height: parent.side;
-                    x: parent.art-x;
-                    y: parent.art-y;
-                    image-fit: fill;
-                }
+                // The large artwork is a still rounded square (the morph stays in the player bar).
                 Art {
-                    visible: root.big-art.width == 0;
                     tint: Palette.accent;
                     source: root.now-art;
-                    border-radius: 40px;
+                    border-radius: 32px;
                     width: parent.side;
                     height: parent.side;
                     x: parent.art-x;
@@ -1217,23 +1209,57 @@ export component AppWindow inherits Window {
                     }
                     // Time-synced lyrics: the line being sung stays in the middle.
                     if root.lyric-lines.length > 0 && root.lyric-synced : Rectangle {
-                        for line[i] in root.lyric-lines : Text {
+                        for line[i] in root.lyric-lines : row := Rectangle {
                             property <int> distance: Math.abs(i - max(root.lyric-index, 0));
+                            property <bool> current: i == root.lyric-index;
                             x: 0px;
                             width: parent.width;
-                            height: 52px;
-                            y: parent.height / 2 - 26px + (i - max(root.lyric-index, 0)) * 52px;
-                            text: line;
-                            overflow: elide;
-                            horizontal-alignment: center;
-                            vertical-alignment: center;
-                            font-size: i == root.lyric-index ? 26px : 20px;
-                            font-weight: i == root.lyric-index ? 700 : 500;
-                            color: i == root.lyric-index ? Palette.on-surface : Palette.on-surface-variant;
-                            opacity: i == root.lyric-index ? 1.0 : (self.distance == 1 ? 0.6 : (self.distance == 2 ? 0.42 : 0.26));
-                            animate y { duration: 380ms; easing: cubic-bezier(0.3, 1.0, 0.4, 1.0); }
-                            animate opacity { duration: 250ms; }
-                            animate font-size { duration: 250ms; }
+                            height: 60px;
+                            y: parent.height / 2 - 30px + (i - max(root.lyric-index, 0)) * 60px;
+                            opacity: self.current ? 1.0 : (self.distance == 1 ? 0.6 : (self.distance == 2 ? 0.4 : 0.22));
+                            animate y { duration: 420ms; easing: cubic-bezier(0.3, 1.0, 0.4, 1.0); }
+                            animate opacity { duration: 280ms; }
+                            // Not shown: the width the line would take at full size.
+                            measure := Text {
+                                text: line == "" ? "♪" : line;
+                                font-size: 26px;
+                                font-weight: 700;
+                                visible: false;
+                            }
+                            base := Text {
+                                width: parent.width;
+                                height: parent.height;
+                                // Gaps between verses show a note instead of an empty row.
+                                text: line == "" ? "♪" : line;
+                                overflow: elide;
+                                horizontal-alignment: center;
+                                vertical-alignment: center;
+                                // The current line shrinks just enough to fit the width.
+                                font-size: parent.current ? (measure.preferred-width > parent.width ? max(16px, 26px * parent.width / measure.preferred-width) : 26px) : 20px;
+                                font-weight: parent.current ? 700 : 500;
+                                color: Palette.on-surface-variant;
+                                animate font-size { duration: 320ms; easing: cubic-bezier(0.3, 1.3, 0.64, 1); }
+                            }
+                            // The line being sung fills with colour as the song moves through it.
+                            if row.current : sweep := Rectangle {
+                                property <length> text-w: min(base.preferred-width, parent.width);
+                                x: (parent.width - self.text-w) / 2;
+                                width: self.text-w * root.lyric-progress;
+                                height: parent.height;
+                                clip: true;
+                                Text {
+                                    x: -((row.width - sweep.text-w) / 2);
+                                    width: row.width;
+                                    height: sweep.height;
+                                    text: base.text;
+                                    overflow: elide;
+                                    horizontal-alignment: center;
+                                    vertical-alignment: center;
+                                    font-size: base.font-size;
+                                    font-weight: base.font-weight;
+                                    color: Palette.primary;
+                                }
+                            }
                         }
                     }
                     // Tapping a line jumps the song to it.
@@ -1241,8 +1267,8 @@ export component AppWindow inherits Window {
                         for time[i] in root.lyric-times : TouchArea {
                             x: 0px;
                             width: parent.width;
-                            height: 52px;
-                            y: parent.height / 2 - 26px + (i - max(root.lyric-index, 0)) * 52px;
+                            height: 60px;
+                            y: parent.height / 2 - 30px + (i - max(root.lyric-index, 0)) * 60px;
                             mouse-cursor: pointer;
                             animate y { duration: 380ms; easing: cubic-bezier(0.3, 1.0, 0.4, 1.0); }
                             clicked => { root.seek(clamp(time / Math.max(root.now-length, 1), 0, 1)); }
