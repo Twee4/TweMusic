@@ -707,6 +707,21 @@ fn main() -> Result<(), slint::PlatformError> {
             if window.get_lyric_index() != line {
                 window.set_lyric_index(line);
             }
+            // How far through that line the song is: lines end before the next one starts.
+            let progress = engine
+                .borrow()
+                .lyrics
+                .as_ref()
+                .filter(|found| found.synced)
+                .and_then(|found| {
+                    let index = usize::try_from(line).ok()?;
+                    let start = found.lines.get(index)?.time;
+                    let gap = found.lines.get(index + 1).map_or(6.0, |next| next.time - start);
+                    let sung_for = (gap * 0.85).clamp(1.0, 8.0);
+                    Some(((seconds - start) / sung_for).clamp(0.0, 1.0) as f32)
+                })
+                .unwrap_or(0.0);
+            window.set_lyric_progress(progress);
             // Light or dark: the setting, or the desktop's preference when it says "system".
             let wanted_dark = match engine.borrow().settings.theme.as_str() {
                 "light" => false,
