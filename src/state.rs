@@ -131,6 +131,29 @@ impl AppState {
         }
     }
 
+    /// Adds tracks at random places after the current song, skipping ones already queued, so new
+    /// songs are mixed in with the ones waiting. Returns how many were added.
+    pub fn insert_shuffled(&mut self, tracks: Vec<Track>) -> usize {
+        let mut added = 0;
+        for track in tracks {
+            if self.queue.contains(&track.id) {
+                continue;
+            }
+            let after = self
+                .current_track
+                .and_then(|id| self.queue.iter().position(|queued| *queued == id))
+                .map_or(0, |index| index + 1);
+            let at = after + random_below(self.queue.len() - after + 1);
+            self.queue.insert(at, track.id);
+            self.unshuffled.push(track.id);
+            if !self.tracks.iter().any(|existing| existing.id == track.id) {
+                self.tracks.push(track);
+            }
+            added += 1;
+        }
+        added
+    }
+
     /// Adds tracks to the end of the queue, skipping ones already queued. Returns how many
     /// were added.
     pub fn append_to_queue(&mut self, tracks: Vec<Track>) -> usize {
@@ -193,17 +216,30 @@ impl AppState {
     }
 }
 
-/// Fisher-Yates with a small xorshift generator seeded from the clock: plenty for a shuffle.
+/// A random number below `bound` from a small xorshift generator seeded from the clock
+/// (plenty for shuffling music).
+pub fn random_below(bound: usize) -> usize {
+    use std::sync::atomic::{AtomicU64, Ordering};
+    static SEED: AtomicU64 = AtomicU64::new(0);
+    let mut seed = SEED.load(Ordering::Relaxed);
+    if seed == 0 {
+        seed = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map_or(0x9E37_79B9_7F4A_7C15, |elapsed| elapsed.as_nanos() as u64)
+            | 1;
+    }
+    seed ^= seed << 13;
+    seed ^= seed >> 7;
+    seed ^= seed << 17;
+    SEED.store(seed, Ordering::Relaxed);
+    // The high bits are the better ones.
+    ((seed >> 11) % bound.max(1) as u64) as usize
+}
+
+/// Fisher-Yates.
 fn shuffle_slice<T>(items: &mut [T]) {
-    let mut seed = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map_or(0x9E37_79B9_7F4A_7C15, |elapsed| elapsed.as_nanos() as u64)
-        | 1;
     for i in (1..items.len()).rev() {
-        seed ^= seed << 13;
-        seed ^= seed >> 7;
-        seed ^= seed << 17;
-        items.swap(i, (seed % (i as u64 + 1)) as usize);
+        items.swap(i, random_below(i + 1));
     }
 }
 

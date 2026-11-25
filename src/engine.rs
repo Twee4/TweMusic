@@ -81,6 +81,10 @@ pub struct Engine {
     direct_failed: Option<TrackId>,
     related_rx: Option<Receiver<Result<Vec<Track>, String>>>,
     related_for: Option<TrackId>,
+    /// Songs already played this run, so shuffle does not bring them straight back.
+    played_session: HashSet<TrackId>,
+    /// When shuffle last asked for more songs (it waits a few seconds between tries).
+    shuffle_fetched_at: Option<Instant>,
     played_something: bool,
     loading_since: Option<Instant>,
     last_poll: Instant,
@@ -175,6 +179,8 @@ impl Engine {
             direct_failed: None,
             related_rx: None,
             related_for: None,
+            played_session: HashSet::new(),
+            shuffle_fetched_at: None,
             played_something: false,
             loading_since: None,
             last_poll: Instant::now(),
@@ -324,6 +330,7 @@ impl Engine {
             self.notify("Invalid video ID.");
             return;
         };
+        self.played_session.insert(track.id);
         if let Some((stream, issued)) = self.cached_stream(track.id) {
             crate::debug_log!("[timing] {video_id}: stream was looked up in advance");
             self.stream_rx = None;
@@ -398,11 +405,40 @@ impl Engine {
             return;
         }
         self.related_for = Some(track.id);
+        self.spawn_related(video_id);
+    }
+
+    fn spawn_related(&mut self, video_id: String) {
         let (tx, rx) = mpsc::channel();
         thread::spawn(move || {
             let _ = tx.send(ytmusic::related_tracks(&video_id));
         });
         self.related_rx = Some(rx);
+    }
+
+    /// With shuffle on, keeps the queue topped up with songs like the ones the person plays: when
+    /// few are waiting, it asks for songs related to the current song or to a random one from
+    /// their recent plays and likes, and mixes them in.
+    fn top_up_shuffle(&mut self) {
+        if !self.state.shuffle || self.related_rx.is_some() || self.state.current_track.is_none() {
+            return;
+        }
+        if self.state.up_next(12).len() >= 10 {
+            return;
+        }
+        if self.shuffle_fetched_at.is_some_and(|at| at.elapsed() < Duration::from_secs(6)) {
+            return;
+        }
+        let mut seeds: Vec<Track> = self.history_tracks().into_iter().take(20).collect();
+        seeds.extend(self.liked_tracks());
+        let current = self.state.current_track().cloned();
+        // One time in three the current song is the seed; otherwise a random favourite.
+        let use_current = seeds.is_empty() || crate::state::random_below(3) == 0;
+        let seed = if use_current { current } else { seeds.get(crate::state::random_below(seeds.len())).cloned() };
+        if let Some(video_id) = seed.and_then(|track| track.video_id) {
+            self.shuffle_fetched_at = Some(Instant::now());
+            self.spawn_related(video_id);
+        }
     }
 
     pub fn skip(&mut self, forward: bool) {
@@ -625,6 +661,7 @@ impl Engine {
     pub fn poll(&mut self) {
         self.poll_stream();
         self.poll_related();
+        self.top_up_shuffle();
         self.poll_search();
         self.poll_pick();
         self.poll_import();
@@ -700,7 +737,12 @@ impl Engine {
         self.related_rx = None;
         // A failed lookup is not worth interrupting playback for; the queue just stays as it is.
         if let Ok(tracks) = result {
-            self.state.append_to_queue(tracks);
+            if self.state.shuffle {
+                let fresh: Vec<Track> = tracks.into_iter().filter(|track| !self.played_session.contains(&track.id)).collect();
+                self.state.insert_shuffled(fresh);
+            } else {
+                self.state.append_to_queue(tracks);
+            }
         }
     }
 
@@ -980,6 +1022,7 @@ impl Engine {
         }
         let Some(track) = self.state.tracks.iter().find(|track| track.id == id).cloned() else { return };
         self.state.play_track(id);
+        self.played_session.insert(id);
         self.library.record_play(&track);
         self.save_library();
         self.stream_issued = issued.or(Some(Instant::now()));
