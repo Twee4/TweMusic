@@ -466,6 +466,10 @@ fn main() -> Result<(), slint::PlatformError> {
     }
     {
         let engine = Rc::clone(&engine);
+        window.on_shuffle_play(move || engine.borrow_mut().shuffle_play());
+    }
+    {
+        let engine = Rc::clone(&engine);
         window.on_play_library(move |index| {
             let mut engine = engine.borrow_mut();
             let tracks = engine.playlist_tracks();

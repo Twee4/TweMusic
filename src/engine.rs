@@ -275,6 +275,31 @@ impl Engine {
         }
     }
 
+    /// Starts shuffled playback: a handful of songs picked from likes and recent plays begin the
+    /// queue, and shuffle then keeps adding similar songs from the whole catalogue.
+    pub fn shuffle_play(&mut self) {
+        let mut pool = self.liked_tracks();
+        pool.extend(self.history_tracks().into_iter().take(40));
+        let mut seen = HashSet::new();
+        pool.retain(|track| track.video_id.is_some() && seen.insert(track.id));
+        if pool.is_empty() {
+            if let Some(pick) = &self.pick {
+                pool.push(pick.track.clone());
+            }
+        }
+        if pool.is_empty() {
+            self.notify("Play or like a few songs first, then shuffle can find more like them.");
+            return;
+        }
+        crate::state::shuffle_slice(&mut pool);
+        pool.truncate(6);
+        if !self.state.shuffle {
+            self.state.shuffle = true;
+            self.update_settings(|settings| settings.shuffle = true);
+        }
+        self.play_from(pool, 0);
+    }
+
     /// Switches shuffle on or off and remembers the choice.
     pub fn toggle_shuffle(&mut self) {
         let on = !self.state.shuffle;

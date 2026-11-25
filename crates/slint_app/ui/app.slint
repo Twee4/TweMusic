@@ -161,6 +161,7 @@ component RoundButton inherits Rectangle {
     in property <image> shape-image;
     in property <image> loader-image;
     in property <bool> busy: false;
+    out property <bool> hovered: ta.has-hover;
     callback clicked();
     // Pressing swells the button sideways, so its neighbours are pushed apart and spring back.
     width: ta.pressed ? root.diameter * 1.16 : root.diameter;
@@ -878,6 +879,8 @@ export component AppWindow inherits Window {
     callback play-library(int);
     callback play-up-next(int);
     callback toggle-shuffle();
+    // Starts shuffled playback from songs like the ones the person plays.
+    callback shuffle-play();
     callback like-up-next(int);
 
     // Settings
@@ -1625,7 +1628,7 @@ export component AppWindow inherits Window {
     }
 
     // Player: one glass card, the same width as the column.
-    Rectangle {
+    player-bar := Rectangle {
         x: 32px + 80px + 24px;
         width: parent.width - self.x - 32px;
         height: 128px;
@@ -1709,7 +1712,7 @@ export component AppWindow inherits Window {
                 }
                 VerticalLayout {
                     alignment: center;
-                    RoundButton {
+                    play-btn := RoundButton {
                         glyph: root.playing ? "M6 19h4V5H6v14zm8-14v14h4V5h-4z" : "M8 5v14l11-7z";
                         diameter: 68px;
                         icon-size: root.playing ? 34px : 26px;
@@ -1757,6 +1760,51 @@ export component AppWindow inherits Window {
                     horizontal-alignment: right;
                     width: 40px;
                 }
+            }
+        }
+        // Shuffle play: appears above the play button when nothing is playing, or while the pointer
+        // is on the play button, and starts shuffled songs like the ones you play.
+        shuffle-pill := Rectangle {
+            width: 140px;
+            height: 36px + 10px;
+            x: play-btn.absolute-position.x - player-bar.absolute-position.x + play-btn.width / 2 - self.width / 2;
+            y: play-btn.absolute-position.y - player-bar.absolute-position.y - self.height;
+            property <bool> shown: (!root.playing && !root.loading) || play-btn.hovered || shuffle-ta.has-hover;
+            opacity: self.shown ? 1.0 : 0.0;
+            animate opacity { duration: 180ms; easing: ease-out; }
+            visible: self.opacity > 0.01;
+            Rectangle {
+                height: 36px;
+                border-radius: shuffle-ta.pressed ? 12px : 18px;
+                animate border-radius { duration: 260ms; easing: cubic-bezier(0.3, 1.3, 0.64, 1); }
+                background: Palette.dark ? Palette.accent : Palette.primary;
+                HorizontalLayout {
+                    alignment: center;
+                    spacing: 8px;
+                    padding-left: 14px;
+                    padding-right: 14px;
+                    VerticalLayout {
+                        alignment: center;
+                        Icon {
+                            glyph: "M10.59 9.17L5.41 4 4 5.41l5.17 5.17 1.42-1.41zM14.5 4l2.04 2.04L4 18.59 5.41 20 17.96 7.46 20 9.5V4h-5.5zm.33 9.41l-1.41 1.41 3.13 3.13L14.5 20H20v-5.5l-2.04 2.04-3.13-3.13z";
+                            size: 18px;
+                            fill: Palette.dark ? Palette.on-accent : Palette.on-primary;
+                        }
+                    }
+                    Text {
+                        text: "Shuffle play";
+                        vertical-alignment: center;
+                        font-size: 14px;
+                        font-weight: 600;
+                        color: Palette.dark ? Palette.on-accent : Palette.on-primary;
+                    }
+                }
+            }
+            // The touch area runs down to the play button, so moving the pointer between them
+            // does not hide the pill.
+            shuffle-ta := TouchArea {
+                mouse-cursor: pointer;
+                clicked => { root.shuffle-play(); }
             }
         }
     }

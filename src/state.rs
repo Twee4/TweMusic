@@ -237,7 +237,7 @@ pub fn random_below(bound: usize) -> usize {
 }
 
 /// Fisher-Yates.
-fn shuffle_slice<T>(items: &mut [T]) {
+pub fn shuffle_slice<T>(items: &mut [T]) {
     for i in (1..items.len()).rev() {
         items.swap(i, random_below(i + 1));
     }
