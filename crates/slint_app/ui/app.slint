@@ -1772,7 +1772,7 @@ export component AppWindow inherits Window {
             property <bool> shown: (!root.playing && !root.loading) || play-btn.hovered || shuffle-ta.has-hover;
             opacity: self.shown ? 1.0 : 0.0;
             animate opacity { duration: 180ms; easing: ease-out; }
-            visible: self.opacity > 0.01;
+            // Not set to invisible when faded out: pointing at its spot brings it back.
             Rectangle {
                 height: 32px;
                 border-radius: shuffle-ta.pressed ? 10px : 16px;
@@ -1806,8 +1806,13 @@ export component AppWindow inherits Window {
             // The touch area runs down to the play button, so moving the pointer between them
             // does not hide the pill.
             shuffle-ta := TouchArea {
-                mouse-cursor: pointer;
-                clicked => { root.shuffle-play(); }
+                mouse-cursor: shuffle-pill.opacity > 0.3 ? MouseCursor.pointer : MouseCursor.default;
+                clicked => {
+                    // A press on the faded-out spot does nothing; wait for it to show first.
+                    if (shuffle-pill.opacity > 0.3) {
+                        root.shuffle-play();
+                    }
+                }
             }
         }
     }
