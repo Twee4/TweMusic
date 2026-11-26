@@ -300,11 +300,15 @@ impl Engine {
         self.play_from(pool, 0);
     }
 
-    /// Switches shuffle on or off and remembers the choice.
-    pub fn toggle_shuffle(&mut self) {
-        let on = !self.state.shuffle;
+    /// Switches shuffle on or off and remembers the choice for the next run.
+    pub fn set_shuffle(&mut self, on: bool) {
         self.state.set_shuffle(on);
         self.update_settings(|settings| settings.shuffle = on);
+    }
+
+    pub fn toggle_shuffle(&mut self) {
+        let on = !self.state.shuffle;
+        self.set_shuffle(on);
     }
 
     pub fn is_playing(&self) -> bool {

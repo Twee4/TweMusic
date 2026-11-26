@@ -481,6 +481,10 @@ fn main() -> Result<(), slint::PlatformError> {
         let weak = window.as_weak();
         window.on_settings_changed(move |name, value| {
             let mut engine = engine.borrow_mut();
+            if name.as_str() == "shuffle" {
+                engine.set_shuffle(value);
+                return;
+            }
             engine.update_settings(|settings| match name.as_str() {
                 "notifications" => settings.notifications = value,
                 "tray" => settings.tray = value,

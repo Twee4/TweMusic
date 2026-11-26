@@ -807,7 +807,7 @@ export component AppWindow inherits Window {
     in property <[float]> lyric-times;
     in property <string> lyric-status;
     in-out property <int> lyric-index: -1;
-    in property <bool> shuffle: false;
+    in-out property <bool> shuffle: false;
     // How far through the current line the song is (0 to 1), for the colour sweep.
     in property <float> lyric-progress: 0;
 
@@ -1563,6 +1563,12 @@ export component AppWindow inherits Window {
                     description: "Closing the window hides it to the tray and playback continues.";
                     on <=> root.set-tray;
                     toggled(value) => { root.settings-changed("tray", value); }
+                }
+                SwitchRow {
+                    title: "Shuffle";
+                    description: "Play songs in random order, mixing in songs like the ones you play. It stays on the next time you open the app.";
+                    on <=> root.shuffle;
+                    toggled(value) => { root.settings-changed("shuffle", value); }
                 }
                 SwitchRow {
                     title: "Dynamic colour";
