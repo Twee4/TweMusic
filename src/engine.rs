@@ -35,6 +35,8 @@ use crate::{
 const PICK_RETRY: Duration = Duration::from_secs(120);
 /// How long a looked-up stream address is reused (they last about six hours).
 const CACHE_MAX_AGE: Duration = Duration::from_secs(4 * 60 * 60);
+/// At most this many songs are looked up just because the pointer rested on them, per minute.
+const HOVER_LOOKUPS_PER_MINUTE: usize = 6;
 /// How many songs ahead of the playing one get their stream looked up in advance.
 const LOOK_AHEAD: usize = 3;
 /// How often mpv is asked for its position.
@@ -111,6 +113,9 @@ pub struct Engine {
     /// A song the pointer rests on, waiting a moment before its stream is looked up.
     hover_wanted: Option<(Track, Instant)>,
     hover_rx: Option<(TrackId, Receiver<Result<Stream, String>>)>,
+    /// When recent hover lookups started, to keep their number low (many quick requests are what
+    /// gets a connection flagged again).
+    hover_lookups: Vec<Instant>,
 
     /// Lyrics of the current song, once found; `lyrics_for` is the song they were asked for.
     pub lyrics: Option<Lyrics>,
@@ -200,6 +205,7 @@ impl Engine {
             ahead_failed: HashSet::new(),
             hover_wanted: None,
             hover_rx: None,
+            hover_lookups: Vec::new(),
             lyrics: None,
             lyrics_for: None,
             lyrics_loading: false,
@@ -925,7 +931,9 @@ impl Engine {
         }
         self.stream_cache.retain(|_, (_, issued)| issued.elapsed() < CACHE_MAX_AGE);
         let target = self.state.up_next(LOOK_AHEAD).into_iter().find(|track| {
-            !self.stream_cache.contains_key(&track.id) && !self.ahead_failed.contains(&track.id)
+            !self.stream_cache.contains_key(&track.id)
+                && !self.ahead_failed.contains(&track.id)
+                && self.hover_rx.as_ref().is_none_or(|(id, _)| *id != track.id)
         });
         let Some(track) = target else { return };
         self.ahead_rx = self.resolve_in_background(&track).map(|rx| (track.id, rx));
@@ -945,14 +953,17 @@ impl Engine {
 
     fn poll_hover(&mut self) {
         if let Some((track, since)) = &self.hover_wanted {
-            if since.elapsed() >= Duration::from_millis(150) {
+            if since.elapsed() >= Duration::from_millis(400) {
                 let track = track.clone();
                 self.hover_wanted = None;
                 let already = self.hover_rx.as_ref().is_some_and(|(id, _)| *id == track.id)
                     || self.ahead_rx.as_ref().is_some_and(|(id, _)| *id == track.id)
                     || self.prefetch_rx.as_ref().is_some_and(|(id, _)| *id == track.id);
-                if !already && self.cached_stream(track.id).is_none() {
+                self.hover_lookups.retain(|at| at.elapsed() < Duration::from_secs(60));
+                let allowed = self.hover_lookups.len() < HOVER_LOOKUPS_PER_MINUTE;
+                if !already && allowed && self.cached_stream(track.id).is_none() {
                     if let Some(rx) = self.resolve_in_background(&track) {
+                        self.hover_lookups.push(Instant::now());
                         crate::debug_log!("[timing] looking up {} ahead of the press", track.title);
                         self.hover_rx = Some((track.id, rx));
                     }
