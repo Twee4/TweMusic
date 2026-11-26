@@ -14,7 +14,14 @@ pub fn http_client() -> Result<reqwest::blocking::Client, InnerTubeError> {
 
 /// Fetches the raw page that contains the visitor ID. Failures just mean "no visitor ID".
 pub fn fetch_visitor_page(http: &reqwest::blocking::Client) -> Option<String> {
-    http.get(VISITOR_DATA_URL).send().ok()?.text().ok()
+    // A plain browser identity: a request with no User-Agent at all is the kind that gets flagged.
+    http.get(VISITOR_DATA_URL)
+        .header("User-Agent", "Mozilla/5.0 (X11; Linux x86_64; rv:128.0) Gecko/20100101 Firefox/128.0")
+        .header("Accept-Language", "en-US,en;q=0.9")
+        .send()
+        .ok()?
+        .text()
+        .ok()
 }
 
 /// Posts a `player` request as `client` and returns the decoded JSON.

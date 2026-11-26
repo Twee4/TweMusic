@@ -14,6 +14,13 @@ use crate::{
     ids, transport, InnerTubeError,
 };
 
+/// Prints a diagnostic line when the `TWEMUSIC_DEBUG` environment variable is set.
+fn trace(message: String) {
+    if std::env::var("TWEMUSIC_DEBUG").is_ok_and(|value| value != "0") {
+        eprintln!("[innertube] {message}");
+    }
+}
+
 /// A resolved audio stream. The user agent must be sent with the media requests, because
 /// the stream URL is bound to the client that asked for it.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -147,7 +154,13 @@ pub fn resolve_with(video_id: &str, profiles: &[ClientProfile]) -> Result<Stream
     }
     let started = Instant::now();
     let http = transport::http_client()?;
-    let visitor_data = cached_visitor_data(&http);
+    // TWEMUSIC_NO_VISITOR=1 skips the visitor ID, to test whether that ID is what gets flagged.
+    let visitor_data = if std::env::var("TWEMUSIC_NO_VISITOR").is_ok_and(|value| value != "0") {
+        None
+    } else {
+        cached_visitor_data(&http)
+    };
+    trace(format!("{video_id}: visitor ID {}", if visitor_data.is_some() { "found" } else { "not used" }));
 
     // Profiles that need signature deciphering are skipped: this crate can't do that yet.
     let usable = clients::eligible(profiles, "player");
@@ -165,6 +178,16 @@ pub fn resolve_with(video_id: &str, profiles: &[ClientProfile]) -> Result<Stream
         let body = request_body(client, video_id, visitor_data.as_deref());
         let attempt = transport::post_player(&http, client, &body, visitor_data.as_deref())
             .and_then(|value| pick_audio_format(&value));
+        trace(format!(
+            "{video_id}: {} {} after {:.1}s: {}",
+            client.name,
+            client.client_version,
+            started.elapsed().as_secs_f32(),
+            match &attempt {
+                Ok((_, mime, bitrate)) => format!("ok ({mime}, {bitrate} bit/s)"),
+                Err(error) => error.to_string(),
+            }
+        ));
         match attempt {
             Ok((url, mime_type, bitrate)) => {
                 clients::remember_success(index);
