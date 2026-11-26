@@ -108,6 +108,9 @@ pub struct Engine {
     stream_cache: HashMap<TrackId, (Stream, Instant)>,
     ahead_rx: Option<(TrackId, Receiver<Result<Stream, String>>)>,
     ahead_failed: HashSet<TrackId>,
+    /// A song the pointer rests on, waiting a moment before its stream is looked up.
+    hover_wanted: Option<(Track, Instant)>,
+    hover_rx: Option<(TrackId, Receiver<Result<Stream, String>>)>,
 
     /// Lyrics of the current song, once found; `lyrics_for` is the song they were asked for.
     pub lyrics: Option<Lyrics>,
@@ -195,6 +198,8 @@ impl Engine {
             stream_cache: HashMap::new(),
             ahead_rx: None,
             ahead_failed: HashSet::new(),
+            hover_wanted: None,
+            hover_rx: None,
             lyrics: None,
             lyrics_for: None,
             lyrics_loading: false,
@@ -329,6 +334,8 @@ impl Engine {
             self.ahead_rx.take().map(|(_, rx)| rx)
         } else if self.prefetch_rx.as_ref().is_some_and(|(id, _)| *id == track.id) {
             self.prefetch_rx.take().map(|(_, rx)| rx)
+        } else if self.hover_rx.as_ref().is_some_and(|(id, _)| *id == track.id) {
+            self.hover_rx.take().map(|(_, rx)| rx)
         } else {
             None
         };
@@ -621,6 +628,7 @@ impl Engine {
         self.poll_import();
         self.poll_prefetch();
         self.poll_ahead();
+        self.poll_hover();
         self.poll_lyrics();
         self.update_stream_refresh();
         self.poll_media();
@@ -919,6 +927,44 @@ impl Engine {
         self.ahead_rx = self.resolve_in_background(&track).map(|rx| (track.id, rx));
         if self.ahead_rx.is_none() {
             self.ahead_failed.insert(track.id);
+        }
+    }
+
+    /// The pointer rests on `track`: after a short pause its stream is looked up, so pressing it
+    /// starts the song at once. Moving on to another song replaces the wish.
+    pub fn warm_track(&mut self, track: Track) {
+        if self.cached_stream(track.id).is_some() || self.ahead_failed.contains(&track.id) {
+            return;
+        }
+        self.hover_wanted = Some((track, Instant::now()));
+    }
+
+    fn poll_hover(&mut self) {
+        if let Some((track, since)) = &self.hover_wanted {
+            if since.elapsed() >= Duration::from_millis(150) {
+                let track = track.clone();
+                self.hover_wanted = None;
+                let already = self.hover_rx.as_ref().is_some_and(|(id, _)| *id == track.id)
+                    || self.ahead_rx.as_ref().is_some_and(|(id, _)| *id == track.id)
+                    || self.prefetch_rx.as_ref().is_some_and(|(id, _)| *id == track.id);
+                if !already && self.cached_stream(track.id).is_none() {
+                    if let Some(rx) = self.resolve_in_background(&track) {
+                        crate::debug_log!("[timing] looking up {} ahead of the press", track.title);
+                        self.hover_rx = Some((track.id, rx));
+                    }
+                }
+            }
+        }
+        let Some((id, rx)) = &self.hover_rx else { return };
+        let id = *id;
+        let result = match rx.try_recv() {
+            Ok(result) => result,
+            Err(TryRecvError::Empty) => return,
+            Err(TryRecvError::Disconnected) => Err(String::new()),
+        };
+        self.hover_rx = None;
+        if let Ok(stream) = result {
+            self.stream_cache.insert(id, (stream, Instant::now()));
         }
     }
 
