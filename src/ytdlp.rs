@@ -49,9 +49,9 @@ pub fn resolve(video_id: &str, browser: Option<&str>) -> Result<Stream, String> 
     let started = Instant::now();
     let stream = find_stream(video_id, browser)?;
     let looked_up = started.elapsed();
-    // Fresh addresses are refused for a few seconds; wait here, off the UI thread, so the
-    // player only ever opens an address that works.
-    twe_innertube::wait_until_playable_within(&stream, std::time::Duration::from_secs(4));
+    // Fresh addresses are refused for a few seconds (the log shows more than four for some);
+    // wait here, off the UI thread, so the player only ever opens an address that works.
+    twe_innertube::wait_until_playable_within(&stream, std::time::Duration::from_secs(12));
     crate::debug_log!(
         "[timing] {video_id}: lookup {:.1}s, wait for address {:.1}s",
         looked_up.as_secs_f32(),
