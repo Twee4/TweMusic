@@ -637,6 +637,41 @@ component Field inherits Rectangle {
     }
 }
 
+// One entry of a right-click menu.
+component MenuItem inherits Rectangle {
+    in property <string> glyph;
+    in property <string> label;
+    callback activated();
+    height: 40px;
+    border-radius: 12px;
+    background: mta.pressed ? Palette.state-layer : (mta.has-hover ? Palette.glass-hover : #00000000);
+    animate background { duration: 100ms; }
+    mta := TouchArea {
+        clicked => { root.activated(); }
+    }
+    HorizontalLayout {
+        padding-left: 12px;
+        padding-right: 12px;
+        spacing: 12px;
+        alignment: start;
+        VerticalLayout {
+            alignment: center;
+            Icon {
+                glyph: root.glyph;
+                size: 20px;
+                fill: Palette.ink-soft;
+            }
+        }
+        Text {
+            text: root.label;
+            vertical-alignment: center;
+            font-size: 14px;
+            font-weight: 600;
+            color: Palette.on-surface;
+        }
+    }
+}
+
 component TrackRow inherits Rectangle {
     out property <bool> hovering: ta.has-hover;
     in property <Entry> entry;
@@ -665,8 +700,50 @@ component TrackRow inherits Rectangle {
         ring-radius: root.border-radius;
         activated => { root.clicked(); }
     }
+    property <length> menu-x;
+    property <length> menu-y;
+    property <int> menu-items: (root.can-queue ? 1 : 0) + (root.can-move-up ? 1 : 0) + (root.can-move-down ? 1 : 0);
     ta := TouchArea {
         clicked => { root.clicked(); }
+        pointer-event(event) => {
+            if (event.button == PointerEventButton.right && event.kind == PointerEventKind.down && root.menu-items > 0) {
+                root.menu-x = min(self.mouse-x, root.width - 196px);
+                root.menu-y = self.mouse-y;
+                menu.show();
+            }
+        }
+    }
+    menu := PopupWindow {
+        x: root.menu-x;
+        y: root.menu-y;
+        width: 196px;
+        height: 16px + 40px * root.menu-items;
+        Rectangle {
+            background: Palette.glass-solid;
+            border-radius: 18px;
+            border-width: 1px;
+            border-color: Palette.outline;
+            drop-shadow-blur: 16px;
+            drop-shadow-color: #00000066;
+            VerticalLayout {
+                padding: 8px;
+                if root.can-queue : MenuItem {
+                    glyph: Glyphs.play-next;
+                    label: "Play next";
+                    activated => { root.queue-next(); }
+                }
+                if root.can-move-up : MenuItem {
+                    glyph: Glyphs.up;
+                    label: "Move up";
+                    activated => { root.move-up(); }
+                }
+                if root.can-move-down : MenuItem {
+                    glyph: Glyphs.down;
+                    label: "Move down";
+                    activated => { root.move-down(); }
+                }
+            }
+        }
     }
     HorizontalLayout {
         padding: 8px;
@@ -699,34 +776,6 @@ component TrackRow inherits Rectangle {
             vertical-alignment: center;
             font-size: 13px;
             color: Palette.on-surface-variant;
-        }
-        if root.can-move-up || root.can-move-down : VerticalLayout {
-            alignment: center;
-            width: 28px;
-            if root.can-move-up : RoundButton {
-                glyph: Glyphs.up;
-                diameter: 28px;
-                icon-size: 20px;
-                fill: #00000000;
-                ink: Palette.ink-soft;
-                clicked => { root.move-up(); }
-            }
-            if root.can-move-down : RoundButton {
-                glyph: Glyphs.down;
-                diameter: 28px;
-                icon-size: 20px;
-                fill: #00000000;
-                ink: Palette.ink-soft;
-                clicked => { root.move-down(); }
-            }
-        }
-        if root.can-queue : RoundButton {
-            glyph: Glyphs.play-next;
-            diameter: 40px;
-            icon-size: 20px;
-            fill: #00000000;
-            ink: Palette.ink-soft;
-            clicked => { root.queue-next(); }
         }
         if root.action-glyph != "" : RoundButton {
             glyph: root.action-glyph;
