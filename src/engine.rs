@@ -81,6 +81,12 @@ pub struct Engine {
     direct_failed: Option<TrackId>,
     related_rx: Option<Receiver<Result<Vec<Track>, String>>>,
     related_for: Option<TrackId>,
+    /// Songs already played this run, so shuffle does not bring them straight back.
+    played_session: HashSet<TrackId>,
+    /// When shuffle last asked for more songs (it waits a few seconds between tries).
+    shuffle_fetched_at: Option<Instant>,
+    /// The Shuffle play button was pressed and the first random songs are on their way.
+    random_start_pending: bool,
     played_something: bool,
     loading_since: Option<Instant>,
     last_poll: Instant,
@@ -158,8 +164,10 @@ impl Engine {
         let (media_tx, media_rx) = mpsc::channel();
         let media = Media::new(media_tx, || {});
         let (tray_tx, tray_rx) = mpsc::channel();
+        let mut state = AppState::new();
+        state.shuffle = settings.shuffle;
         let mut engine = Self {
-            state: AppState::new(),
+            state,
             library,
             settings,
             library_path,
@@ -176,6 +184,9 @@ impl Engine {
             direct_failed: None,
             related_rx: None,
             related_for: None,
+            played_session: HashSet::new(),
+            shuffle_fetched_at: None,
+            random_start_pending: false,
             played_something: false,
             loading_since: None,
             last_poll: Instant::now(),
@@ -272,6 +283,29 @@ impl Engine {
         }
     }
 
+    /// Starts shuffled playback: switches shuffle on and plays a random song from all over, with
+    /// more random songs after it.
+    pub fn shuffle_play(&mut self) {
+        if !self.state.shuffle {
+            self.state.set_shuffle(true);
+            self.update_settings(|settings| settings.shuffle = true);
+        }
+        self.random_start_pending = true;
+        self.message = Some("Finding a random song…".to_owned());
+        self.spawn_random();
+    }
+
+    /// Switches shuffle on or off and remembers the choice for the next run.
+    pub fn set_shuffle(&mut self, on: bool) {
+        self.state.set_shuffle(on);
+        self.update_settings(|settings| settings.shuffle = on);
+    }
+
+    pub fn toggle_shuffle(&mut self) {
+        let on = !self.state.shuffle;
+        self.set_shuffle(on);
+    }
+
     pub fn is_playing(&self) -> bool {
         self.state.playback == PlaybackStatus::Playing
     }
@@ -320,6 +354,7 @@ impl Engine {
             self.notify("Invalid video ID.");
             return;
         };
+        self.played_session.insert(track.id);
         if let Some((stream, issued)) = self.cached_stream(track.id) {
             crate::debug_log!("[timing] {video_id}: stream was looked up in advance");
             self.stream_rx = None;
@@ -391,16 +426,48 @@ impl Engine {
 
     /// Fetches songs similar to `track` and queues them after it.
     fn start_related(&mut self, track: &Track) {
+        // Shuffle gets its songs from random searches, not from what is related to this one.
+        if self.state.shuffle {
+            return;
+        }
         let Some(video_id) = track.video_id.clone() else { return };
         if self.related_for == Some(track.id) {
             return;
         }
         self.related_for = Some(track.id);
+        self.spawn_related(video_id);
+    }
+
+    fn spawn_related(&mut self, video_id: String) {
         let (tx, rx) = mpsc::channel();
         thread::spawn(move || {
             let _ = tx.send(ytmusic::related_tracks(&video_id));
         });
         self.related_rx = Some(rx);
+    }
+
+    fn spawn_random(&mut self) {
+        let (tx, rx) = mpsc::channel();
+        thread::spawn(move || {
+            let _ = tx.send(ytmusic::random_tracks());
+        });
+        self.related_rx = Some(rx);
+    }
+
+    /// With shuffle on, keeps the queue topped up with random songs from all over: when few are
+    /// waiting, it fetches a fresh batch and mixes it in.
+    fn top_up_shuffle(&mut self) {
+        if !self.state.shuffle || self.related_rx.is_some() || self.state.current_track.is_none() {
+            return;
+        }
+        if self.state.up_next(12).len() >= 6 {
+            return;
+        }
+        if self.shuffle_fetched_at.is_some_and(|at| at.elapsed() < Duration::from_secs(6)) {
+            return;
+        }
+        self.shuffle_fetched_at = Some(Instant::now());
+        self.spawn_random();
     }
 
     pub fn skip(&mut self, forward: bool) {
@@ -420,6 +487,11 @@ impl Engine {
     }
 
     pub fn toggle_pause(&mut self) {
+        // With shuffle on and nothing picked yet, the play button starts a random song.
+        if self.state.shuffle && self.state.current_track.is_none() {
+            self.shuffle_play();
+            return;
+        }
         let Some(player) = &mut self.mpv else {
             self.notify("Pick a song to start playback.");
             return;
@@ -623,6 +695,7 @@ impl Engine {
     pub fn poll(&mut self) {
         self.poll_stream();
         self.poll_related();
+        self.top_up_shuffle();
         self.poll_search();
         self.poll_pick();
         self.poll_import();
@@ -697,9 +770,26 @@ impl Engine {
             Err(TryRecvError::Disconnected) => Ok(Vec::new()),
         };
         self.related_rx = None;
+        if self.random_start_pending {
+            self.random_start_pending = false;
+            match result {
+                Ok(tracks) if !tracks.is_empty() => {
+                    let rest = tracks[1..].to_vec();
+                    self.play_from(tracks, 0);
+                    self.state.append_to_queue(rest);
+                }
+                _ => self.notify("Could not find random songs right now. Check the connection and try again."),
+            }
+            return;
+        }
         // A failed lookup is not worth interrupting playback for; the queue just stays as it is.
         if let Ok(tracks) = result {
-            self.state.append_to_queue(tracks);
+            if self.state.shuffle {
+                let fresh: Vec<Track> = tracks.into_iter().filter(|track| !self.played_session.contains(&track.id)).collect();
+                self.state.insert_shuffled(fresh);
+            } else {
+                self.state.append_to_queue(tracks);
+            }
         }
     }
 
@@ -1017,6 +1107,7 @@ impl Engine {
         }
         let Some(track) = self.state.tracks.iter().find(|track| track.id == id).cloned() else { return };
         self.state.play_track(id);
+        self.played_session.insert(id);
         self.library.record_play(&track);
         self.save_library();
         self.stream_issued = issued.or(Some(Instant::now()));

@@ -236,6 +236,7 @@ struct ListKey {
 /// only when something they show has changed.
 fn sync(window: &AppWindow, engine: &Engine, art: &mut Art, key: &mut ListKey, now_pixels: &mut Option<Pixels>) {
     window.set_greeting(engine::greeting(engine.hour).into());
+    window.set_shuffle(engine.state.shuffle);
 
     let next = ListKey {
         history_len: engine.library.history.len(),
@@ -461,6 +462,14 @@ fn main() -> Result<(), slint::PlatformError> {
     }
     {
         let engine = Rc::clone(&engine);
+        window.on_toggle_shuffle(move || engine.borrow_mut().toggle_shuffle());
+    }
+    {
+        let engine = Rc::clone(&engine);
+        window.on_shuffle_play(move || engine.borrow_mut().shuffle_play());
+    }
+    {
+        let engine = Rc::clone(&engine);
         window.on_warm_song(move |kind, index| {
             let mut engine = engine.borrow_mut();
             let index = index.max(0) as usize;
@@ -492,6 +501,10 @@ fn main() -> Result<(), slint::PlatformError> {
         let weak = window.as_weak();
         window.on_settings_changed(move |name, value| {
             let mut engine = engine.borrow_mut();
+            if name.as_str() == "shuffle" {
+                engine.set_shuffle(value);
+                return;
+            }
             engine.update_settings(|settings| match name.as_str() {
                 "notifications" => settings.notifications = value,
                 "tray" => settings.tray = value,

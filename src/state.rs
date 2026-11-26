@@ -15,6 +15,10 @@ pub struct AppState {
     pub remote_results: Vec<Track>,
     pub search_message: Option<String>,
     pub queue: Vec<TrackId>,
+    /// Shuffle is on: the songs after the current one are in random order.
+    pub shuffle: bool,
+    /// The queue's order before shuffling, so turning shuffle off can put it back.
+    unshuffled: Vec<TrackId>,
     pub current_track: Option<TrackId>,
     pub playback: PlaybackStatus,
 }
@@ -30,6 +34,8 @@ impl AppState {
             remote_results: Vec::new(),
             search_message: None,
             queue,
+            shuffle: false,
+            unshuffled: Vec::new(),
             current_track: None,
             playback: PlaybackStatus::Stopped,
         }
@@ -91,7 +97,62 @@ impl AppState {
             }
         }
         self.queue = queue;
+        if self.shuffle {
+            // Shuffle plays the song picked and then random songs from everywhere: the rest of
+            // the list it came from is not kept, but it is remembered for when shuffle goes off.
+            self.unshuffled = self.queue.clone();
+            self.queue.truncate(1);
+        }
         self.queue.first().copied()
+    }
+
+    /// Turns shuffle on or off. On: the songs waiting after the current one are set aside and
+    /// random songs take their place. Off: the original order comes back (songs added meanwhile
+    /// go at the end).
+    pub fn set_shuffle(&mut self, on: bool) {
+        if on == self.shuffle {
+            return;
+        }
+        self.shuffle = on;
+        if on {
+            self.unshuffled = self.queue.clone();
+            let keep = self
+                .current_track
+                .and_then(|id| self.queue.iter().position(|queued| *queued == id))
+                .map_or(0, |index| index + 1);
+            self.queue.truncate(keep);
+        } else {
+            let mut restored = std::mem::take(&mut self.unshuffled);
+            for id in &self.queue {
+                if !restored.contains(id) {
+                    restored.push(*id);
+                }
+            }
+            self.queue = restored;
+        }
+    }
+
+    /// Adds tracks at random places after the current song, skipping ones already queued, so new
+    /// songs are mixed in with the ones waiting. Returns how many were added.
+    pub fn insert_shuffled(&mut self, tracks: Vec<Track>) -> usize {
+        let mut added = 0;
+        for track in tracks {
+            if self.queue.contains(&track.id) {
+                continue;
+            }
+            let after = self
+                .current_track
+                .and_then(|id| self.queue.iter().position(|queued| *queued == id))
+                .map_or(0, |index| index + 1);
+            let at = after + random_below(self.queue.len() - after + 1);
+            self.queue.insert(at, track.id);
+            self.unshuffled.push(track.id);
+            if !self.tracks.iter().any(|existing| existing.id == track.id) {
+                self.tracks.push(track);
+            }
+            added += 1;
+        }
+        added
     }
 
     /// Adds tracks to the end of the queue, skipping ones already queued. Returns how many
@@ -103,6 +164,9 @@ impl AppState {
                 continue;
             }
             self.queue.push(track.id);
+            if self.shuffle {
+                self.unshuffled.push(track.id);
+            }
             if !self.tracks.iter().any(|existing| existing.id == track.id) {
                 self.tracks.push(track);
             }
@@ -150,6 +214,33 @@ impl AppState {
             _ => match self.queue.first() { Some(id) => *id, None => return },
         };
         self.play_track(previous);
+    }
+}
+
+/// A random number below `bound` from a small xorshift generator seeded from the clock
+/// (plenty for shuffling music).
+pub fn random_below(bound: usize) -> usize {
+    use std::sync::atomic::{AtomicU64, Ordering};
+    static SEED: AtomicU64 = AtomicU64::new(0);
+    let mut seed = SEED.load(Ordering::Relaxed);
+    if seed == 0 {
+        seed = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map_or(0x9E37_79B9_7F4A_7C15, |elapsed| elapsed.as_nanos() as u64)
+            | 1;
+    }
+    seed ^= seed << 13;
+    seed ^= seed >> 7;
+    seed ^= seed << 17;
+    SEED.store(seed, Ordering::Relaxed);
+    // The high bits are the better ones.
+    ((seed >> 11) % bound.max(1) as u64) as usize
+}
+
+/// Fisher-Yates.
+pub fn shuffle_slice<T>(items: &mut [T]) {
+    for i in (1..items.len()).rev() {
+        items.swap(i, random_below(i + 1));
     }
 }
 
@@ -259,5 +350,16 @@ mod tests {
         state.play_track(TrackId(200));
         assert_eq!(state.adjacent_remote(false), Some(TrackId(100)));
         assert_eq!(state.adjacent_remote(true), None);
+    }
+
+    #[test]
+    fn shuffle_keeps_only_the_current_song_and_restores_the_order() {
+        let mut state = state_with_songs();
+        state.play_track(TrackId(1));
+        let original = state.queue.clone();
+        state.set_shuffle(true);
+        assert_eq!(state.queue, vec![TrackId(1)]);
+        state.set_shuffle(false);
+        assert_eq!(state.queue, original);
     }
 }
