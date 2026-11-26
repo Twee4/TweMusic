@@ -98,15 +98,17 @@ impl AppState {
         }
         self.queue = queue;
         if self.shuffle {
-            // The first song plays first; the rest come in random order.
+            // Shuffle plays the song picked and then random songs from everywhere: the rest of
+            // the list it came from is not kept, but it is remembered for when shuffle goes off.
             self.unshuffled = self.queue.clone();
-            shuffle_slice(self.queue.get_mut(1..).unwrap_or_default());
+            self.queue.truncate(1);
         }
         self.queue.first().copied()
     }
 
-    /// Turns shuffle on or off. On: everything after the current song is mixed up. Off: the
-    /// original order comes back (songs added meanwhile go at the end).
+    /// Turns shuffle on or off. On: the songs waiting after the current one are set aside and
+    /// random songs take their place. Off: the original order comes back (songs added meanwhile
+    /// go at the end).
     pub fn set_shuffle(&mut self, on: bool) {
         if on == self.shuffle {
             return;
@@ -114,20 +116,19 @@ impl AppState {
         self.shuffle = on;
         if on {
             self.unshuffled = self.queue.clone();
-            let after = self
+            let keep = self
                 .current_track
                 .and_then(|id| self.queue.iter().position(|queued| *queued == id))
                 .map_or(0, |index| index + 1);
-            shuffle_slice(self.queue.get_mut(after..).unwrap_or_default());
+            self.queue.truncate(keep);
         } else {
-            let mut restored: Vec<TrackId> = self.unshuffled.iter().copied().filter(|id| self.queue.contains(id)).collect();
+            let mut restored = std::mem::take(&mut self.unshuffled);
             for id in &self.queue {
                 if !restored.contains(id) {
                     restored.push(*id);
                 }
             }
             self.queue = restored;
-            self.unshuffled.clear();
         }
     }
 
@@ -352,17 +353,12 @@ mod tests {
     }
 
     #[test]
-    fn shuffle_keeps_current_and_the_same_songs_and_restores_order() {
+    fn shuffle_keeps_only_the_current_song_and_restores_the_order() {
         let mut state = state_with_songs();
         state.play_track(TrackId(1));
         let original = state.queue.clone();
         state.set_shuffle(true);
-        assert_eq!(state.queue[0], TrackId(1));
-        let mut sorted = state.queue.clone();
-        sorted.sort_by_key(|id| id.0);
-        let mut expected = original.clone();
-        expected.sort_by_key(|id| id.0);
-        assert_eq!(sorted, expected);
+        assert_eq!(state.queue, vec![TrackId(1)]);
         state.set_shuffle(false);
         assert_eq!(state.queue, original);
     }

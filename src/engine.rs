@@ -85,6 +85,8 @@ pub struct Engine {
     played_session: HashSet<TrackId>,
     /// When shuffle last asked for more songs (it waits a few seconds between tries).
     shuffle_fetched_at: Option<Instant>,
+    /// The Shuffle play button was pressed and the first random songs are on their way.
+    random_start_pending: bool,
     played_something: bool,
     loading_since: Option<Instant>,
     last_poll: Instant,
@@ -181,6 +183,7 @@ impl Engine {
             related_for: None,
             played_session: HashSet::new(),
             shuffle_fetched_at: None,
+            random_start_pending: false,
             played_something: false,
             loading_since: None,
             last_poll: Instant::now(),
@@ -275,29 +278,16 @@ impl Engine {
         }
     }
 
-    /// Starts shuffled playback: a handful of songs picked from likes and recent plays begin the
-    /// queue, and shuffle then keeps adding similar songs from the whole catalogue.
+    /// Starts shuffled playback: switches shuffle on and plays a random song from all over, with
+    /// more random songs after it.
     pub fn shuffle_play(&mut self) {
-        let mut pool = self.liked_tracks();
-        pool.extend(self.history_tracks().into_iter().take(40));
-        let mut seen = HashSet::new();
-        pool.retain(|track| track.video_id.is_some() && seen.insert(track.id));
-        if pool.is_empty() {
-            if let Some(pick) = &self.pick {
-                pool.push(pick.track.clone());
-            }
-        }
-        if pool.is_empty() {
-            self.notify("Play or like a few songs first, then shuffle can find more like them.");
-            return;
-        }
-        crate::state::shuffle_slice(&mut pool);
-        pool.truncate(6);
         if !self.state.shuffle {
-            self.state.shuffle = true;
+            self.state.set_shuffle(true);
             self.update_settings(|settings| settings.shuffle = true);
         }
-        self.play_from(pool, 0);
+        self.random_start_pending = true;
+        self.message = Some("Finding a random song…".to_owned());
+        self.spawn_random();
     }
 
     /// Switches shuffle on or off and remembers the choice for the next run.
@@ -429,6 +419,10 @@ impl Engine {
 
     /// Fetches songs similar to `track` and queues them after it.
     fn start_related(&mut self, track: &Track) {
+        // Shuffle gets its songs from random searches, not from what is related to this one.
+        if self.state.shuffle {
+            return;
+        }
         let Some(video_id) = track.video_id.clone() else { return };
         if self.related_for == Some(track.id) {
             return;
@@ -445,29 +439,28 @@ impl Engine {
         self.related_rx = Some(rx);
     }
 
-    /// With shuffle on, keeps the queue topped up with songs like the ones the person plays: when
-    /// few are waiting, it asks for songs related to the current song or to a random one from
-    /// their recent plays and likes, and mixes them in.
+    fn spawn_random(&mut self) {
+        let (tx, rx) = mpsc::channel();
+        thread::spawn(move || {
+            let _ = tx.send(ytmusic::random_tracks());
+        });
+        self.related_rx = Some(rx);
+    }
+
+    /// With shuffle on, keeps the queue topped up with random songs from all over: when few are
+    /// waiting, it fetches a fresh batch and mixes it in.
     fn top_up_shuffle(&mut self) {
         if !self.state.shuffle || self.related_rx.is_some() || self.state.current_track.is_none() {
             return;
         }
-        if self.state.up_next(12).len() >= 10 {
+        if self.state.up_next(12).len() >= 6 {
             return;
         }
         if self.shuffle_fetched_at.is_some_and(|at| at.elapsed() < Duration::from_secs(6)) {
             return;
         }
-        let mut seeds: Vec<Track> = self.history_tracks().into_iter().take(20).collect();
-        seeds.extend(self.liked_tracks());
-        let current = self.state.current_track().cloned();
-        // One time in three the current song is the seed; otherwise a random favourite.
-        let use_current = seeds.is_empty() || crate::state::random_below(3) == 0;
-        let seed = if use_current { current } else { seeds.get(crate::state::random_below(seeds.len())).cloned() };
-        if let Some(video_id) = seed.and_then(|track| track.video_id) {
-            self.shuffle_fetched_at = Some(Instant::now());
-            self.spawn_related(video_id);
-        }
+        self.shuffle_fetched_at = Some(Instant::now());
+        self.spawn_random();
     }
 
     pub fn skip(&mut self, forward: bool) {
@@ -487,6 +480,11 @@ impl Engine {
     }
 
     pub fn toggle_pause(&mut self) {
+        // With shuffle on and nothing picked yet, the play button starts a random song.
+        if self.state.shuffle && self.state.current_track.is_none() {
+            self.shuffle_play();
+            return;
+        }
         let Some(player) = &mut self.mpv else {
             self.notify("Pick a song to start playback.");
             return;
@@ -764,6 +762,18 @@ impl Engine {
             Err(TryRecvError::Disconnected) => Ok(Vec::new()),
         };
         self.related_rx = None;
+        if self.random_start_pending {
+            self.random_start_pending = false;
+            match result {
+                Ok(tracks) if !tracks.is_empty() => {
+                    let rest = tracks[1..].to_vec();
+                    self.play_from(tracks, 0);
+                    self.state.append_to_queue(rest);
+                }
+                _ => self.notify("Could not find random songs right now. Check the connection and try again."),
+            }
+            return;
+        }
         // A failed lookup is not worth interrupting playback for; the queue just stays as it is.
         if let Ok(tracks) = result {
             if self.state.shuffle {
