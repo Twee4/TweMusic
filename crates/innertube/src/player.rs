@@ -51,17 +51,24 @@ pub fn wait_until_playable_within(stream: &Stream, patience: Duration) {
         return;
     }
     let Ok(http) = crate::transport::http_client() else { return };
-    let deadline = Instant::now() + patience;
+    let started = Instant::now();
+    let deadline = started + patience;
     loop {
         let answer = http
             .get(&stream.url)
             .header("User-Agent", stream.user_agent.as_str())
-            .header("Range", "bytes=0-1")
+            // Ask the way the player does (everything from the start, not just two bytes): an
+            // address can answer the small request while still refusing the real one. The answer
+            // is read from the headers only and the connection is dropped at once.
+            .header("Range", "bytes=0-")
             .send()
             .map(|response| response.status().as_u16());
         match answer {
             Ok(status) if still_warming_up(status) && Instant::now() < deadline => std::thread::sleep(Duration::from_millis(250)),
-            _ => return,
+            other => {
+                trace(format!("address check: {other:?} after {:.1}s", started.elapsed().as_secs_f32()));
+                return;
+            }
         }
     }
 }
