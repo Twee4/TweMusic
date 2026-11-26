@@ -125,6 +125,18 @@ impl MpvPlayer {
         explain_log(&String::from_utf8_lossy(tail))
     }
 
+    /// The last few lines mpv logged, for diagnosing a stream that would not open.
+    pub fn recent_log(&self, lines: usize) -> Vec<String> {
+        let Ok(log) = fs::read(&self.log_path) else { return Vec::new() };
+        let tail = &log[log.len().saturating_sub(16 * 1024)..];
+        let text = String::from_utf8_lossy(tail);
+        let all: Vec<&str> = text.lines().collect();
+        all[all.len().saturating_sub(lines)..]
+            .iter()
+            .map(|line| line.chars().take(220).collect::<String>())
+            .collect()
+    }
+
     /// Index of the playing entry in mpv's playlist. It becomes 1 when a queued stream has
     /// taken over from the track before it.
     pub fn playlist_pos(&mut self) -> Option<i64> {

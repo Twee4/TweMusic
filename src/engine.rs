@@ -823,6 +823,13 @@ impl Engine {
             "[timing] playback did not start; mpv said: {}",
             self.mpv.as_ref().and_then(|player| player.last_problem()).unwrap_or_else(|| "nothing (it never reported an error)".to_owned())
         );
+        if crate::debug_enabled() {
+            if let Some(player) = self.mpv.as_ref() {
+                for line in player.recent_log(14) {
+                    eprintln!("[mpv] {line}");
+                }
+            }
+        }
         let current = self.state.current_track.and_then(|id| self.state.tracks.iter().find(|track| track.id == id).cloned());
         if let Some(track) = current {
             let video_id = track.video_id.clone().filter(|id| ytmusic::youtube_music_url(id).is_some());
