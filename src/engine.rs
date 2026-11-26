@@ -81,6 +81,8 @@ pub struct Engine {
     pending_track: Option<Track>,
     /// The song whose direct stream would not play, so it was retried through yt-dlp once.
     direct_failed: Option<TrackId>,
+    /// The song whose stream was refused once and is being looked up again the direct way.
+    direct_retry: Option<TrackId>,
     related_rx: Option<Receiver<Result<Vec<Track>, String>>>,
     related_for: Option<TrackId>,
     played_something: bool,
@@ -179,6 +181,7 @@ impl Engine {
             stream_rx: None,
             pending_track: None,
             direct_failed: None,
+            direct_retry: None,
             related_rx: None,
             related_for: None,
             played_something: false,
@@ -793,6 +796,7 @@ impl Engine {
                 crate::debug_log!("[timing] mpv opened the stream and started playing after {:.1}s", since.elapsed().as_secs_f32());
             }
             self.played_something = true;
+            self.direct_retry = None;
             self.loading_since = None;
         }
         self.handle_gapless(position, duration);
@@ -833,6 +837,19 @@ impl Engine {
         let current = self.state.current_track.and_then(|id| self.state.tracks.iter().find(|track| track.id == id).cloned());
         if let Some(track) = current {
             let video_id = track.video_id.clone().filter(|id| ytmusic::youtube_music_url(id).is_some());
+            // A fresh address is sometimes refused (403) on the first try: ask for a new one the
+            // same way before giving up on the direct route.
+            if self.direct_retry != Some(track.id) && video_id.is_some() {
+                self.direct_retry = Some(track.id);
+                self.stream_cache.remove(&track.id);
+                if let Some(rx) = self.resolve_in_background(&track) {
+                    crate::debug_log!("[timing] the stream was refused; looking up a new address");
+                    self.stream_rx = Some(rx);
+                    self.pending_track = Some(track.clone());
+                    self.message = Some(format!("Retrying {}…", track.title));
+                    return;
+                }
+            }
             if let (Some(video_id), true) = (video_id, self.direct_failed != Some(track.id)) {
                 self.direct_failed = Some(track.id);
                 self.stream_cache.remove(&track.id);

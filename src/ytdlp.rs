@@ -29,6 +29,10 @@ const SKIP_DIRECT_FOR: Duration = Duration::from_secs(10 * 60);
 const FALLBACK_USER_AGENT: &str =
     "Mozilla/5.0 (X11; Linux x86_64; rv:128.0) Gecko/20100101 Firefox/128.0";
 
+/// After a stream address that was handed out then refused with 403 (twice in a row), the direct
+/// route rests only briefly: that is a hiccup, not the bot check.
+const SKIP_DIRECT_AFTER_REFUSED_STREAM: Duration = Duration::from_secs(2 * 60);
+
 static BLOCKED_UNTIL: Mutex<Option<Instant>> = Mutex::new(None);
 
 /// The setting value for "use yt-dlp, but read no cookies".
@@ -108,7 +112,7 @@ fn wants_solver(stderr: &str) -> bool {
 /// while. Blocks, so call it from a worker thread.
 pub fn resolve_after_direct_failure(video_id: &str, browser: &str) -> Result<Stream, String> {
     if let Ok(mut slot) = BLOCKED_UNTIL.lock() {
-        *slot = Some(Instant::now() + SKIP_DIRECT_FOR);
+        *slot = Some(Instant::now() + SKIP_DIRECT_AFTER_REFUSED_STREAM);
     }
     let stream = via_ytdlp(video_id, if is_supported_browser(browser) { browser } else { NO_SIGN_IN })?;
     twe_innertube::wait_until_playable_within(&stream, std::time::Duration::from_secs(4));
