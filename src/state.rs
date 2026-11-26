@@ -19,6 +19,8 @@ pub struct AppState {
     pub shuffle: bool,
     /// The queue's order before shuffling, so turning shuffle off can put it back.
     unshuffled: Vec<TrackId>,
+    /// Songs the user asked to play next; shuffled-in songs are placed after them.
+    pinned: Vec<TrackId>,
     pub current_track: Option<TrackId>,
     pub playback: PlaybackStatus,
 }
@@ -36,6 +38,7 @@ impl AppState {
             queue,
             shuffle: false,
             unshuffled: Vec::new(),
+            pinned: Vec::new(),
             current_track: None,
             playback: PlaybackStatus::Stopped,
         }
@@ -140,10 +143,13 @@ impl AppState {
             if self.queue.contains(&track.id) {
                 continue;
             }
-            let after = self
+            let mut after = self
                 .current_track
                 .and_then(|id| self.queue.iter().position(|queued| *queued == id))
                 .map_or(0, |index| index + 1);
+            while self.queue.get(after).is_some_and(|id| self.pinned.contains(id)) {
+                after += 1;
+            }
             let at = after + random_below(self.queue.len() - after + 1);
             self.queue.insert(at, track.id);
             self.unshuffled.push(track.id);
@@ -153,6 +159,34 @@ impl AppState {
             added += 1;
         }
         added
+    }
+
+    /// Puts a song right after the current one (a song already queued moves there). Songs asked
+    /// for this way keep their order, first asked first, and shuffled-in songs go after them.
+    /// With nothing current, the song just becomes the first in the queue.
+    pub fn play_next(&mut self, track: Track) {
+        let id = track.id;
+        let current = self.current_track;
+        self.queue.retain(|queued| *queued != id || Some(*queued) == current);
+        self.pinned.retain(|pinned| *pinned != id);
+        if !self.tracks.iter().any(|existing| existing.id == id) {
+            self.tracks.push(track);
+        }
+        if current == Some(id) {
+            return;
+        }
+        let mut at = current
+            .and_then(|current| self.queue.iter().position(|queued| *queued == current))
+            .map_or(0, |index| index + 1);
+        while self.queue.get(at).is_some_and(|queued| self.pinned.contains(queued)) {
+            at += 1;
+        }
+        self.queue.insert(at, id);
+        self.pinned.push(id);
+        if self.shuffle {
+            self.unshuffled.retain(|queued| *queued != id);
+            self.unshuffled.push(id);
+        }
     }
 
     /// Adds tracks to the end of the queue, skipping ones already queued. Returns how many
@@ -333,6 +367,30 @@ mod tests {
         let upcoming: Vec<u64> = state.up_next(10).iter().map(|track| track.id.0).collect();
         assert_eq!(upcoming, vec![200, 300]);
         assert_eq!(state.up_next(1).len(), 1);
+    }
+
+    #[test]
+    fn play_next_goes_after_the_current_song_in_the_order_asked() {
+        let mut state = AppState::new();
+        let remote = |id: u64| {
+            let mut track = Track::new(id, "T", "A", None, 10);
+            track.video_id = Some(format!("{id:0>11}"));
+            track
+        };
+        state.set_queue(vec![remote(1), remote(2), remote(3)]);
+        state.play_track(TrackId(1));
+        state.play_next(remote(9));
+        state.play_next(remote(3));
+        let upcoming: Vec<u64> = state.up_next(10).iter().map(|track| track.id.0).collect();
+        assert_eq!(upcoming, vec![9, 3, 2]);
+        // Asking again for a song already waiting moves it to the end of the asked-for ones.
+        state.play_next(remote(9));
+        let upcoming: Vec<u64> = state.up_next(10).iter().map(|track| track.id.0).collect();
+        assert_eq!(upcoming, vec![3, 9, 2]);
+        // Shuffled-in songs never go in front of them.
+        state.insert_shuffled(vec![remote(50), remote(51), remote(52)]);
+        let upcoming: Vec<u64> = state.up_next(10).iter().map(|track| track.id.0).collect();
+        assert_eq!(&upcoming[..2], &[3, 9]);
     }
 
     #[test]

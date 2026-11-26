@@ -470,6 +470,22 @@ fn main() -> Result<(), slint::PlatformError> {
     }
     {
         let engine = Rc::clone(&engine);
+        window.on_queue_next(move |kind, index| {
+            let mut engine = engine.borrow_mut();
+            let index = index.max(0) as usize;
+            let track = match kind {
+                4 => engine.state.remote_results.get(index).cloned(),
+                5 => engine.up_next_tracks().get(index).cloned(),
+                6 => engine.playlist_tracks().get(index).cloned(),
+                _ => None,
+            };
+            if let Some(track) = track.filter(|track| track.video_id.is_some()) {
+                engine.play_next(track);
+            }
+        });
+    }
+    {
+        let engine = Rc::clone(&engine);
         window.on_warm_song(move |kind, index| {
             let mut engine = engine.borrow_mut();
             let index = index.max(0) as usize;
