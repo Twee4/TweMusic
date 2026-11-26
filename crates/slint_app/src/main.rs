@@ -462,6 +462,10 @@ fn main() -> Result<(), slint::PlatformError> {
     }
     {
         let engine = Rc::clone(&engine);
+        window.on_move_up_next(move |from, to| engine.borrow_mut().move_up_next(from.max(0) as usize, to.max(0) as usize));
+    }
+    {
+        let engine = Rc::clone(&engine);
         window.on_toggle_shuffle(move || engine.borrow_mut().toggle_shuffle());
     }
     {

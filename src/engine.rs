@@ -296,6 +296,11 @@ impl Engine {
         self.notify(format!("Playing next: {}", track.title));
     }
 
+    /// Moves a song in the Up next list to another place in it.
+    pub fn move_up_next(&mut self, from: usize, to: usize) {
+        self.state.move_up_next(from, to);
+    }
+
     /// Jumps to a song in the Up next list; the rest of the queue stays as it is.
     pub fn play_up_next(&mut self, index: usize) {
         if let Some(track) = self.up_next_tracks().get(index).cloned() {

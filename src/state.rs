@@ -189,6 +189,26 @@ impl AppState {
         }
     }
 
+    /// Moves a song in the Up next list (positions as `up_next` lists them) to another place in
+    /// it. A song moved in front of every shuffled-in one stays ahead of them.
+    pub fn move_up_next(&mut self, from: usize, to: usize) {
+        let Some(current_at) = self.current_track.and_then(|id| self.queue.iter().position(|queued| *queued == id)) else {
+            return;
+        };
+        let is_remote = |id: &TrackId| self.tracks.iter().any(|track| track.id == *id && track.video_id.is_some());
+        let places: Vec<usize> = (current_at + 1..self.queue.len()).filter(|at| is_remote(&self.queue[*at])).collect();
+        if from == to || from >= places.len() || to >= places.len() {
+            return;
+        }
+        let id = self.queue.remove(places[from]);
+        self.queue.insert(places[to], id);
+        self.pinned.retain(|pinned| *pinned != id);
+        let ahead = self.queue[current_at + 1..].iter().take_while(|queued| **queued != id).all(|queued| self.pinned.contains(queued));
+        if ahead {
+            self.pinned.push(id);
+        }
+    }
+
     /// Adds tracks to the end of the queue, skipping ones already queued. Returns how many
     /// were added.
     pub fn append_to_queue(&mut self, tracks: Vec<Track>) -> usize {
@@ -391,6 +411,25 @@ mod tests {
         state.insert_shuffled(vec![remote(50), remote(51), remote(52)]);
         let upcoming: Vec<u64> = state.up_next(10).iter().map(|track| track.id.0).collect();
         assert_eq!(&upcoming[..2], &[3, 9]);
+    }
+
+    #[test]
+    fn move_up_next_reorders_the_waiting_songs() {
+        let mut state = AppState::new();
+        let remote = |id: u64| {
+            let mut track = Track::new(id, "T", "A", None, 10);
+            track.video_id = Some(format!("{id:0>11}"));
+            track
+        };
+        state.set_queue(vec![remote(1), remote(2), remote(3), remote(4)]);
+        state.play_track(TrackId(1));
+        let order = |state: &AppState| state.up_next(10).iter().map(|track| track.id.0).collect::<Vec<u64>>();
+        state.move_up_next(2, 0);
+        assert_eq!(order(&state), vec![4, 2, 3]);
+        state.move_up_next(0, 2);
+        assert_eq!(order(&state), vec![2, 3, 4]);
+        state.move_up_next(1, 9);
+        assert_eq!(order(&state), vec![2, 3, 4]);
     }
 
     #[test]
