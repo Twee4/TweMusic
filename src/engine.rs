@@ -825,7 +825,7 @@ impl Engine {
         );
         if crate::debug_enabled() {
             if let Some(player) = self.mpv.as_ref() {
-                for line in player.recent_log(14) {
+                for line in player.recent_log(24) {
                     eprintln!("[mpv] {line}");
                 }
             }

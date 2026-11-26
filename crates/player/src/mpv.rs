@@ -130,7 +130,8 @@ impl MpvPlayer {
         let Ok(log) = fs::read(&self.log_path) else { return Vec::new() };
         let tail = &log[log.len().saturating_sub(16 * 1024)..];
         let text = String::from_utf8_lossy(tail);
-        let all: Vec<&str> = text.lines().collect();
+        // The IPC lines (the app polling mpv) are noise; keep the rest.
+        let all: Vec<&str> = text.lines().filter(|line| !line.contains("][ipc_")).collect();
         all[all.len().saturating_sub(lines)..]
             .iter()
             .map(|line| line.chars().take(220).collect::<String>())
