@@ -35,6 +35,8 @@ use crate::{
 const PICK_RETRY: Duration = Duration::from_secs(120);
 /// How long a looked-up stream address is reused (they last about six hours).
 const CACHE_MAX_AGE: Duration = Duration::from_secs(4 * 60 * 60);
+/// At most this many songs are looked up just because the pointer rested on them, per minute.
+const HOVER_LOOKUPS_PER_MINUTE: usize = 6;
 /// How many songs ahead of the playing one get their stream looked up in advance.
 const LOOK_AHEAD: usize = 3;
 /// How often mpv is asked for its position.
@@ -79,6 +81,8 @@ pub struct Engine {
     pending_track: Option<Track>,
     /// The song whose direct stream would not play, so it was retried through yt-dlp once.
     direct_failed: Option<TrackId>,
+    /// The song whose stream was refused once and is being looked up again the direct way.
+    direct_retry: Option<TrackId>,
     related_rx: Option<Receiver<Result<Vec<Track>, String>>>,
     related_for: Option<TrackId>,
     /// Songs already played this run, so shuffle does not bring them straight back.
@@ -117,6 +121,9 @@ pub struct Engine {
     /// A song the pointer rests on, waiting a moment before its stream is looked up.
     hover_wanted: Option<(Track, Instant)>,
     hover_rx: Option<(TrackId, Receiver<Result<Stream, String>>)>,
+    /// When recent hover lookups started, to keep their number low (many quick requests are what
+    /// gets a connection flagged again).
+    hover_lookups: Vec<Instant>,
 
     /// Lyrics of the current song, once found; `lyrics_for` is the song they were asked for.
     pub lyrics: Option<Lyrics>,
@@ -182,6 +189,7 @@ impl Engine {
             stream_rx: None,
             pending_track: None,
             direct_failed: None,
+            direct_retry: None,
             related_rx: None,
             related_for: None,
             played_session: HashSet::new(),
@@ -211,6 +219,7 @@ impl Engine {
             ahead_failed: HashSet::new(),
             hover_wanted: None,
             hover_rx: None,
+            hover_lookups: Vec::new(),
             lyrics: None,
             lyrics_for: None,
             lyrics_loading: false,
@@ -877,6 +886,7 @@ impl Engine {
                 crate::debug_log!("[timing] mpv opened the stream and started playing after {:.1}s", since.elapsed().as_secs_f32());
             }
             self.played_something = true;
+            self.direct_retry = None;
             self.loading_since = None;
         }
         self.handle_gapless(position, duration);
@@ -903,9 +913,33 @@ impl Engine {
     /// A fresh stream address is sometimes refused (403). Try once more through yt-dlp, which
     /// handles that, before giving up.
     fn retry_or_give_up(&mut self) {
+        crate::debug_log!(
+            "[timing] playback did not start; mpv said: {}",
+            self.mpv.as_ref().and_then(|player| player.last_problem()).unwrap_or_else(|| "nothing (it never reported an error)".to_owned())
+        );
+        if crate::debug_enabled() {
+            if let Some(player) = self.mpv.as_ref() {
+                for line in player.recent_log(24) {
+                    eprintln!("[mpv] {line}");
+                }
+            }
+        }
         let current = self.state.current_track.and_then(|id| self.state.tracks.iter().find(|track| track.id == id).cloned());
         if let Some(track) = current {
             let video_id = track.video_id.clone().filter(|id| ytmusic::youtube_music_url(id).is_some());
+            // A fresh address is sometimes refused (403) on the first try: ask for a new one the
+            // same way before giving up on the direct route.
+            if self.direct_retry != Some(track.id) && video_id.is_some() {
+                self.direct_retry = Some(track.id);
+                self.stream_cache.remove(&track.id);
+                if let Some(rx) = self.resolve_in_background(&track) {
+                    crate::debug_log!("[timing] the stream was refused; looking up a new address");
+                    self.stream_rx = Some(rx);
+                    self.pending_track = Some(track.clone());
+                    self.message = Some(format!("Retrying {}…", track.title));
+                    return;
+                }
+            }
             if let (Some(video_id), true) = (video_id, self.direct_failed != Some(track.id)) {
                 self.direct_failed = Some(track.id);
                 self.stream_cache.remove(&track.id);
@@ -1011,7 +1045,9 @@ impl Engine {
         }
         self.stream_cache.retain(|_, (_, issued)| issued.elapsed() < CACHE_MAX_AGE);
         let target = self.state.up_next(LOOK_AHEAD).into_iter().find(|track| {
-            !self.stream_cache.contains_key(&track.id) && !self.ahead_failed.contains(&track.id)
+            !self.stream_cache.contains_key(&track.id)
+                && !self.ahead_failed.contains(&track.id)
+                && self.hover_rx.as_ref().is_none_or(|(id, _)| *id != track.id)
         });
         let Some(track) = target else { return };
         self.ahead_rx = self.resolve_in_background(&track).map(|rx| (track.id, rx));
@@ -1031,14 +1067,17 @@ impl Engine {
 
     fn poll_hover(&mut self) {
         if let Some((track, since)) = &self.hover_wanted {
-            if since.elapsed() >= Duration::from_millis(150) {
+            if since.elapsed() >= Duration::from_millis(400) {
                 let track = track.clone();
                 self.hover_wanted = None;
                 let already = self.hover_rx.as_ref().is_some_and(|(id, _)| *id == track.id)
                     || self.ahead_rx.as_ref().is_some_and(|(id, _)| *id == track.id)
                     || self.prefetch_rx.as_ref().is_some_and(|(id, _)| *id == track.id);
-                if !already && self.cached_stream(track.id).is_none() {
+                self.hover_lookups.retain(|at| at.elapsed() < Duration::from_secs(60));
+                let allowed = self.hover_lookups.len() < HOVER_LOOKUPS_PER_MINUTE;
+                if !already && allowed && self.cached_stream(track.id).is_none() {
                     if let Some(rx) = self.resolve_in_background(&track) {
+                        self.hover_lookups.push(Instant::now());
                         crate::debug_log!("[timing] looking up {} ahead of the press", track.title);
                         self.hover_rx = Some((track.id, rx));
                     }

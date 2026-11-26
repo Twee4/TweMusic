@@ -41,27 +41,35 @@ const LOOKUP_BUDGET: Duration = Duration::from_secs(5);
 /// the address at once fails, so ask for two bytes until the address starts working. Returns
 /// as soon as it does; on any other answer or error it returns too and lets the player decide.
 pub fn wait_until_playable(stream: &Stream) {
-    wait_until_playable_within(stream, READY_PATIENCE);
+    let _ = wait_until_playable_within(stream, READY_PATIENCE);
 }
 
 /// Like `wait_until_playable`, but gives up after `patience`. Addresses that yt-dlp produced are
 /// meant for its own headers, so this probe may be refused for good while the player is fine.
-pub fn wait_until_playable_within(stream: &Stream, patience: Duration) {
+/// Returns false only when the address was still refused (403) when patience ran out.
+pub fn wait_until_playable_within(stream: &Stream, patience: Duration) -> bool {
     if !is_allowed_stream_url(&stream.url) {
-        return;
+        return true;
     }
-    let Ok(http) = crate::transport::http_client() else { return };
-    let deadline = Instant::now() + patience;
+    let Ok(http) = crate::transport::http_client() else { return true };
+    let started = Instant::now();
+    let deadline = started + patience;
     loop {
         let answer = http
             .get(&stream.url)
             .header("User-Agent", stream.user_agent.as_str())
-            .header("Range", "bytes=0-1")
+            // Ask the way the player does (everything from the start, not just two bytes): an
+            // address can answer the small request while still refusing the real one. The answer
+            // is read from the headers only and the connection is dropped at once.
+            .header("Range", "bytes=0-")
             .send()
             .map(|response| response.status().as_u16());
         match answer {
             Ok(status) if still_warming_up(status) && Instant::now() < deadline => std::thread::sleep(Duration::from_millis(250)),
-            _ => return,
+            other => {
+                trace(format!("address check: {other:?} after {:.1}s", started.elapsed().as_secs_f32()));
+                return !matches!(other, Ok(status) if still_warming_up(status));
+            }
         }
     }
 }
