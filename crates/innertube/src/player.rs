@@ -14,6 +14,13 @@ use crate::{
     ids, transport, InnerTubeError,
 };
 
+/// Prints a diagnostic line when the `TWEMUSIC_DEBUG` environment variable is set.
+fn trace(message: String) {
+    if std::env::var("TWEMUSIC_DEBUG").is_ok_and(|value| value != "0") {
+        eprintln!("[innertube] {message}");
+    }
+}
+
 /// A resolved audio stream. The user agent must be sent with the media requests, because
 /// the stream URL is bound to the client that asked for it.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -110,17 +117,35 @@ pub fn pick_audio_format(response: &Value) -> Result<(String, String, u64), Inne
         .ok_or(InnerTubeError::NoFormat)
 }
 
-/// Finds the visitor ID in YouTube's `sw.js_data` payload (it looks like `"visitorData":"Cgt…"`
-/// or a bare quoted ID after the `VISITOR_DATA` key). Returns None if it can't be found.
+/// Finds the visitor ID in YouTube's `sw.js_data` payload. The page is a nested list in which the
+/// ID is just a quoted string (it begins `Cgt` or `Cgs` and ends `%3D%3D`), so a key like
+/// `"visitorData":` is tried first and then any quoted string of that shape. Returns None if
+/// neither is found.
 pub fn find_visitor_data(text: &str) -> Option<String> {
+    let looks_right = |value: &str| {
+        value.len() >= 16
+            && value.len() < 512
+            && value.chars().all(|ch| ch.is_ascii_alphanumeric() || "-_%=".contains(ch))
+    };
     for key in ["\"visitorData\"", "\"VISITOR_DATA\""] {
-        let Some(start) = text.find(key) else { continue; };
-        let rest = text[start + key.len()..].trim_start().strip_prefix(':')?.trim_start();
-        let rest = rest.strip_prefix('"')?;
-        let end = rest.find('"')?;
-        let value = &rest[..end];
-        if !value.is_empty() && value.len() < 512 && value.chars().all(|ch| ch.is_ascii_alphanumeric() || "-_%=".contains(ch)) {
-            return Some(value.to_owned());
+        let Some(start) = text.find(key) else { continue };
+        let Some(rest) = text[start + key.len()..].trim_start().strip_prefix(':') else { continue };
+        let Some(rest) = rest.trim_start().strip_prefix('"') else { continue };
+        let Some(end) = rest.find('"') else { continue };
+        if looks_right(&rest[..end]) || (!rest[..end].is_empty() && rest[..end].len() < 512 && rest[..end].chars().all(|ch| ch.is_ascii_alphanumeric() || "-_%=".contains(ch))) {
+            return Some(rest[..end].to_owned());
+        }
+    }
+    for prefix in ["\"Cgt", "\"Cgs"] {
+        let mut from = 0;
+        while let Some(found) = text[from..].find(prefix) {
+            let start = from + found + 1;
+            let Some(length) = text[start..].find('"') else { break };
+            let value = &text[start..start + length];
+            if looks_right(value) {
+                return Some(value.to_owned());
+            }
+            from = start;
         }
     }
     None
@@ -147,7 +172,13 @@ pub fn resolve_with(video_id: &str, profiles: &[ClientProfile]) -> Result<Stream
     }
     let started = Instant::now();
     let http = transport::http_client()?;
-    let visitor_data = cached_visitor_data(&http);
+    // TWEMUSIC_NO_VISITOR=1 skips the visitor ID, to test whether that ID is what gets flagged.
+    let visitor_data = if std::env::var("TWEMUSIC_NO_VISITOR").is_ok_and(|value| value != "0") {
+        None
+    } else {
+        cached_visitor_data(&http)
+    };
+    trace(format!("{video_id}: visitor ID {}", if visitor_data.is_some() { "found" } else { "not used" }));
 
     // Profiles that need signature deciphering are skipped: this crate can't do that yet.
     let usable = clients::eligible(profiles, "player");
@@ -165,6 +196,16 @@ pub fn resolve_with(video_id: &str, profiles: &[ClientProfile]) -> Result<Stream
         let body = request_body(client, video_id, visitor_data.as_deref());
         let attempt = transport::post_player(&http, client, &body, visitor_data.as_deref())
             .and_then(|value| pick_audio_format(&value));
+        trace(format!(
+            "{video_id}: {} {} after {:.1}s: {}",
+            client.name,
+            client.client_version,
+            started.elapsed().as_secs_f32(),
+            match &attempt {
+                Ok((_, mime, bitrate)) => format!("ok ({mime}, {bitrate} bit/s)"),
+                Err(error) => error.to_string(),
+            }
+        ));
         match attempt {
             Ok((url, mime_type, bitrate)) => {
                 clients::remember_success(index);
@@ -194,7 +235,12 @@ fn cached_visitor_data(http: &reqwest::blocking::Client) -> Option<String> {
             }
         }
     }
-    let fresh = transport::fetch_visitor_page(http).and_then(|page| find_visitor_data(&page))?;
+    let page = transport::fetch_visitor_page(http);
+    trace(match &page {
+        Some(page) => format!("visitor page: {} bytes, ID {}", page.len(), if find_visitor_data(page).is_some() { "found" } else { "not found" }),
+        None => "visitor page: request failed".to_owned(),
+    });
+    let fresh = page.and_then(|page| find_visitor_data(&page))?;
     if let Ok(mut slot) = VISITOR.lock() {
         *slot = Some((fresh.clone(), Instant::now()));
     }
@@ -310,6 +356,14 @@ mod tests {
         assert_eq!(find_visitor_data(r#"{"VISITOR_DATA" : "Cgt9"}"#).as_deref(), Some("Cgt9"));
         assert_eq!(find_visitor_data("nothing here"), None);
         assert_eq!(find_visitor_data(r#""visitorData":"bad value""#), None);
+    }
+
+    #[test]
+    fn finds_a_bare_visitor_id_in_a_nested_list() {
+        let page = r#")]}'
+[[["x",null,[["a",[1,2],"Cgt4S1ZsT2Z3d0JSOCjV%3D%3D",3]],"b"]]]"#;
+        assert_eq!(find_visitor_data(page).as_deref(), Some("Cgt4S1ZsT2Z3d0JSOCjV%3D%3D"));
+        assert_eq!(find_visitor_data(r#"["Cgtshort"]"#), None);
     }
 
     #[test]

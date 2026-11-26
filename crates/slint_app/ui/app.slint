@@ -201,6 +201,7 @@ component RoundButton inherits Rectangle {
 
 component QuickCard inherits Rectangle {
     in property <Song> song;
+    out property <bool> hovering: ta.has-hover;
     callback clicked();
     height: ta.pressed ? 62px : 56px;
     animate height { duration: 300ms; easing: cubic-bezier(0.3, 1.3, 0.64, 1); }
@@ -243,6 +244,7 @@ component QuickCard inherits Rectangle {
 component ShelfCard inherits Rectangle {
     in property <Song> song;
     out property <bool> focused: card-focus.focused;
+    out property <bool> hovering: ta.has-hover;
     callback clicked();
     // The shelf sets the width so a row of cards fills the page; the cover stays square.
     width: 156px;
@@ -286,6 +288,8 @@ component Shelf inherits VerticalLayout {
     callback picked(int);
     // Asks the page to scroll so a focused card (its top on screen, and its height) is in view.
     callback reveal(length, length);
+    // The pointer rests on a card: the page can look its stream up before it is pressed.
+    callback warm(int);
     // Only the songs that fit in one row show; "See all" opens the rest as a grid below them.
     in-out property <bool> open: false;
     spacing: 8px;
@@ -334,6 +338,9 @@ component Shelf inherits VerticalLayout {
             width: strip.card-w;
             song: song;
             clicked => { root.picked(i); }
+            changed hovering => {
+                if (self.hovering) { root.warm(i); }
+            }
             changed focused => {
                 if (self.focused) {
                     // Tabbing to a card in a hidden row opens the shelf, then scrolls to it.
@@ -346,6 +353,7 @@ component Shelf inherits VerticalLayout {
 }
 
 component PickCard inherits Rectangle {
+    out property <bool> hovering: ta.has-hover;
     in property <Song> song;
     in property <string> why;
     in property <bool> playing;
@@ -627,6 +635,7 @@ component Field inherits Rectangle {
 }
 
 component TrackRow inherits Rectangle {
+    out property <bool> hovering: ta.has-hover;
     in property <Entry> entry;
     in property <string> action-glyph;
     in property <bool> action-active;
@@ -881,6 +890,8 @@ export component AppWindow inherits Window {
     callback toggle-shuffle();
     // Starts shuffled playback from songs like the ones the person plays.
     callback shuffle-play();
+    // Pointer on a song (kind: 0 pick, 1 more, 2 recent, 3 liked, 4 result, 5 up next, 6 library).
+    callback warm-song(int, int);
     callback like-up-next(int);
 
     // Settings
@@ -1106,6 +1117,7 @@ export component AppWindow inherits Window {
                     why: root.pick-why;
                     playing: root.playing && root.now-title == root.pick.title;
                     clicked => { root.play-pick(); }
+                    changed hovering => { if (self.hovering) { root.warm-song(0, 0); } }
                 }
                 GridLayout {
                     spacing: 8px;
@@ -1114,24 +1126,28 @@ export component AppWindow inherits Window {
                         col: mod(i, 2);
                         song: song;
                         clicked => { root.play-recent(i); }
+                        changed hovering => { if (self.hovering) { root.warm-song(2, i); } }
                     }
                 }
                 if root.more.length > 0 : Shelf {
                     heading: "More like today's pick";
                     songs: root.more;
                     picked(i) => { root.play-more(i); }
+                    warm(i) => { root.warm-song(1, i); }
                     reveal(y, h) => { home-scroll.content-y = root.scrolled-y(home-scroll.content-y, y, h, home-scroll.absolute-position.y, home-scroll.height); }
                 }
                 if root.recent.length > 0 : Shelf {
                     heading: "Recently played";
                     songs: root.recent;
                     picked(i) => { root.play-recent(i); }
+                    warm(i) => { root.warm-song(2, i); }
                     reveal(y, h) => { home-scroll.content-y = root.scrolled-y(home-scroll.content-y, y, h, home-scroll.absolute-position.y, home-scroll.height); }
                 }
                 if root.liked.length > 0 : Shelf {
                     heading: "Liked songs";
                     songs: root.liked;
                     picked(i) => { root.play-liked(i); }
+                    warm(i) => { root.warm-song(3, i); }
                     reveal(y, h) => { home-scroll.content-y = root.scrolled-y(home-scroll.content-y, y, h, home-scroll.absolute-position.y, home-scroll.height); }
                 }
                 if !root.has-pick && root.recent.length == 0 && root.liked.length == 0 : Text {
@@ -1375,6 +1391,7 @@ export component AppWindow inherits Window {
                             for entry[i] in root.up-next-rows : TrackRow {
                                 entry: entry;
                                 clicked => { root.play-up-next(i); }
+                                changed hovering => { if (self.hovering) { root.warm-song(5, i); } }
                             }
                         }
                     }
@@ -1406,6 +1423,7 @@ export component AppWindow inherits Window {
                         entry: entry;
                         action-glyph: entry.liked ? Glyphs.heart-filled : Glyphs.heart;
                         action-active: entry.liked;
+                        changed hovering => { if (self.hovering) { root.warm-song(4, i); } }
                         clicked => {
                             root.play-result(i);
                             root.search-open = false;
@@ -1522,6 +1540,7 @@ export component AppWindow inherits Window {
                     entry: entry;
                     action-glyph: Glyphs.close;
                     clicked => { root.play-library(i); }
+                    changed hovering => { if (self.hovering) { root.warm-song(6, i); } }
                     action => { root.remove-track(i); }
                 }
             }
