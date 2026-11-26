@@ -461,6 +461,26 @@ fn main() -> Result<(), slint::PlatformError> {
     }
     {
         let engine = Rc::clone(&engine);
+        window.on_warm_song(move |kind, index| {
+            let mut engine = engine.borrow_mut();
+            let index = index.max(0) as usize;
+            let track = match kind {
+                0 => engine.pick.as_ref().map(|pick| pick.track.clone()),
+                1 => engine.pick.as_ref().and_then(|pick| pick.more.get(index).cloned()),
+                2 => engine.history_tracks().get(index).cloned(),
+                3 => engine.liked_tracks().get(index).cloned(),
+                4 => engine.state.remote_results.get(index).cloned(),
+                5 => engine.up_next_tracks().get(index).cloned(),
+                6 => engine.playlist_tracks().get(index).cloned(),
+                _ => None,
+            };
+            if let Some(track) = track {
+                engine.warm_track(track);
+            }
+        });
+    }
+    {
+        let engine = Rc::clone(&engine);
         window.on_play_library(move |index| {
             let mut engine = engine.borrow_mut();
             let tracks = engine.playlist_tracks();
