@@ -113,6 +113,9 @@ component RailItem inherits Rectangle {
                     glyph: root.glyph;
                     size: 22px;
                     fill: root.selected ? Palette.on-accent : Palette.ink-soft;
+                    // Pressing stretches the icon sideways about its centre; it springs back.
+                    transform-scale-x: ta.pressed ? 1.45 : 1.0;
+                    animate transform-scale-x { duration: 450ms; easing: cubic-bezier(0.3, 1.7, 0.5, 1); }
                 }
             }
         }
