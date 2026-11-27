@@ -462,11 +462,31 @@ fn main() -> Result<(), slint::PlatformError> {
     }
     {
         let engine = Rc::clone(&engine);
+        window.on_move_up_next(move |from, to| engine.borrow_mut().move_up_next(from.max(0) as usize, to.max(0) as usize));
+    }
+    {
+        let engine = Rc::clone(&engine);
         window.on_toggle_shuffle(move || engine.borrow_mut().toggle_shuffle());
     }
     {
         let engine = Rc::clone(&engine);
         window.on_shuffle_play(move || engine.borrow_mut().shuffle_play());
+    }
+    {
+        let engine = Rc::clone(&engine);
+        window.on_queue_next(move |kind, index| {
+            let mut engine = engine.borrow_mut();
+            let index = index.max(0) as usize;
+            let track = match kind {
+                4 => engine.state.remote_results.get(index).cloned(),
+                5 => engine.up_next_tracks().get(index).cloned(),
+                6 => engine.playlist_tracks().get(index).cloned(),
+                _ => None,
+            };
+            if let Some(track) = track.filter(|track| track.video_id.is_some()) {
+                engine.play_next(track);
+            }
+        });
     }
     {
         let engine = Rc::clone(&engine);

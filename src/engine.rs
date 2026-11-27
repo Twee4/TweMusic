@@ -284,6 +284,23 @@ impl Engine {
         self.state.up_next(40)
     }
 
+    /// Queues a song to play right after the current one. With nothing playing it just plays.
+    pub fn play_next(&mut self, track: Track) {
+        if self.state.current_track.is_none() {
+            self.state.play_next(track.clone());
+            self.state.play_track(track.id);
+            self.play_remote(&track);
+            return;
+        }
+        self.state.play_next(track.clone());
+        self.notify(format!("Playing next: {}", track.title));
+    }
+
+    /// Moves a song in the Up next list to another place in it.
+    pub fn move_up_next(&mut self, from: usize, to: usize) {
+        self.state.move_up_next(from, to);
+    }
+
     /// Jumps to a song in the Up next list; the rest of the queue stays as it is.
     pub fn play_up_next(&mut self, index: usize) {
         if let Some(track) = self.up_next_tracks().get(index).cloned() {

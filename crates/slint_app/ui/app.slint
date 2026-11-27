@@ -50,6 +50,9 @@ global Glyphs {
     out property <string> heart-filled: "M12 21.35l-1.45-1.32C5.4 15.36 2 12.28 2 8.5 2 5.42 4.42 3 7.5 3c1.74 0 3.41.81 4.5 2.09C13.09 3.81 14.76 3 16.5 3 19.58 3 22 5.42 22 8.5c0 3.78-3.4 6.86-8.55 11.54L12 21.35z";
     out property <string> search: "M15.5 14h-.79l-.28-.27A6.471 6.471 0 0016 9.5 6.5 6.5 0 109.5 16c1.61 0 3.09-.59 4.23-1.57l.27.28v.79l5 4.99L20.49 19l-4.99-5zm-6 0C7.01 14 5 11.99 5 9.5S7.01 5 9.5 5 14 7.01 14 9.5 11.99 14 9.5 14z";
     out property <string> check: "M9 16.17L4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41z";
+    out property <string> play-next: "M3 6h12v2H3zM3 11h12v2H3zM3 16h8v2H3zM17 11v8l6-4z";
+    out property <string> up: "M7.41 15.41L12 10.83l4.59 4.58L18 14l-6-6-6 6z";
+    out property <string> down: "M7.41 8.59L12 13.17l4.59-4.58L18 10l-6 6-6-6z";
     out property <string> close: "M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z";
 }
 
@@ -92,15 +95,14 @@ component RailItem inherits Rectangle {
     in property <bool> selected;
     callback clicked();
     width: 80px;
-    height: ta.pressed ? 70px : 64px;
-    animate height { duration: 300ms; easing: cubic-bezier(0.3, 1.3, 0.64, 1); }
+    height: 64px;
     VerticalLayout {
         alignment: center;
         spacing: 4px;
         HorizontalLayout {
             alignment: center;
             Rectangle {
-                width: root.selected ? 56px : 36px;
+                width: (root.selected ? 56px : 36px) + (ta.pressed ? 8px : 0px);
                 animate width { duration: 320ms; easing: cubic-bezier(0.3, 1.3, 0.64, 1); }
                 height: 32px;
                 border-radius: ta.pressed ? 10px : 16px;
@@ -111,6 +113,9 @@ component RailItem inherits Rectangle {
                     glyph: root.glyph;
                     size: 22px;
                     fill: root.selected ? Palette.on-accent : Palette.ink-soft;
+                    // Pressing stretches the icon sideways about its centre; it springs back.
+                    transform-scale-x: ta.pressed ? 1.45 : 1.0;
+                    animate transform-scale-x { duration: 450ms; easing: cubic-bezier(0.3, 1.7, 0.5, 1); }
                 }
             }
         }
@@ -203,17 +208,23 @@ component QuickCard inherits Rectangle {
     in property <Song> song;
     out property <bool> hovering: ta.has-hover;
     callback clicked();
-    height: ta.pressed ? 62px : 56px;
-    animate height { duration: 300ms; easing: cubic-bezier(0.3, 1.3, 0.64, 1); }
+    height: 56px;
+    // Pressing stretches the whole element sideways about its centre (the height never changes)
+    // and it springs back to the centre.
+    transform-scale-x: ta.pressed ? min(1.0 + 12px / self.width, 1.05) : 1.0;
+    animate transform-scale-x { duration: 450ms; easing: cubic-bezier(0.3, 1.7, 0.5, 1); }
     // Square-ish at rest, rounder under the finger, with the springy Expressive motion.
     border-radius: ta.pressed ? 22px : 12px;
     animate border-radius { duration: 260ms; easing: cubic-bezier(0.3, 1.3, 0.64, 1); }
-    background: ta.has-hover ? Palette.glass-hover : Palette.glass;
-    animate background { duration: 120ms; }
     Rectangle {
         border-radius: root.border-radius;
-        background: ta.pressed ? Palette.state-layer : #00000000;
-        animate background { duration: 80ms; }
+        background: ta.has-hover ? Palette.glass-hover : Palette.glass;
+        animate background { duration: 120ms; }
+        Rectangle {
+            border-radius: root.border-radius;
+            background: ta.pressed ? Palette.state-layer : #00000000;
+            animate background { duration: 80ms; }
+        }
     }
     HorizontalLayout {
         spacing: 12px;
@@ -358,12 +369,18 @@ component PickCard inherits Rectangle {
     in property <string> why;
     in property <bool> playing;
     callback clicked();
-    height: ta.pressed ? 156px : 148px;
-    animate height { duration: 300ms; easing: cubic-bezier(0.3, 1.3, 0.64, 1); }
+    height: 148px;
+    // Pressing stretches the whole element sideways about its centre (the height never changes)
+    // and it springs back to the centre.
+    transform-scale-x: ta.pressed ? min(1.0 + 12px / self.width, 1.05) : 1.0;
+    animate transform-scale-x { duration: 450ms; easing: cubic-bezier(0.3, 1.7, 0.5, 1); }
     border-radius: ta.pressed ? 40px : 28px;
     animate border-radius { duration: 300ms; easing: cubic-bezier(0.3, 1.3, 0.64, 1); }
-    background: ta.has-hover ? Palette.accent.with-alpha(0.8) : Palette.accent.with-alpha(0.6);
-    animate background { duration: 150ms; }
+    Rectangle {
+        border-radius: root.border-radius;
+        background: ta.has-hover ? Palette.accent.with-alpha(0.8) : Palette.accent.with-alpha(0.6);
+        animate background { duration: 120ms; }
+    }
     HorizontalLayout {
         padding: 14px;
         spacing: 16px;
@@ -499,18 +516,23 @@ component TextButton inherits Rectangle {
     in property <bool> destructive: false;
     in property <bool> enabled: true;
     callback clicked();
-    height: ta.pressed ? 44px : 40px;
-    animate height { duration: 300ms; easing: cubic-bezier(0.3, 1.3, 0.64, 1); }
+    height: 40px;
+    // Pressing stretches the whole element sideways about its centre (the height never changes)
+    // and it springs back to the centre.
+    transform-scale-x: ta.pressed ? min(1.0 + 12px / self.width, 1.05) : 1.0;
+    animate transform-scale-x { duration: 450ms; easing: cubic-bezier(0.3, 1.7, 0.5, 1); }
     border-radius: ta.pressed ? 12px : 20px;
     animate border-radius { duration: 260ms; easing: cubic-bezier(0.3, 1.3, 0.64, 1); }
     opacity: root.enabled ? 1.0 : 0.38;
-    background: root.destructive ? (ta.has-hover ? #8c3a4a : #7a2f3f)
-        : (root.filled ? (ta.has-hover ? Palette.accent.brighter(0.25) : Palette.accent) : (ta.has-hover ? Palette.glass-hover : Palette.glass));
-    animate background { duration: 120ms; }
     Rectangle {
         border-radius: root.border-radius;
-        background: ta.pressed ? Palette.state-layer : #00000000;
-        animate background { duration: 80ms; }
+        background: root.destructive ? (ta.has-hover ? #8c3a4a : #7a2f3f) : (root.filled ? (ta.has-hover ? Palette.accent.brighter(0.25) : Palette.accent) : (ta.has-hover ? Palette.glass-hover : Palette.glass));
+        animate background { duration: 120ms; }
+        Rectangle {
+            border-radius: root.border-radius;
+            background: ta.pressed ? Palette.state-layer : #00000000;
+            animate background { duration: 80ms; }
+        }
     }
     HorizontalLayout {
         padding-left: 20px;
@@ -634,32 +656,155 @@ component Field inherits Rectangle {
     }
 }
 
+// One entry of a right-click menu.
+component MenuItem inherits Rectangle {
+    in property <string> glyph;
+    in property <string> label;
+    callback activated();
+    height: 40px;
+    border-radius: 12px;
+    background: mta.pressed ? Palette.state-layer : (mta.has-hover ? Palette.glass-hover : #00000000);
+    animate background { duration: 100ms; }
+    mta := TouchArea {
+        clicked => { root.activated(); }
+    }
+    HorizontalLayout {
+        padding-left: 12px;
+        padding-right: 12px;
+        spacing: 12px;
+        alignment: start;
+        VerticalLayout {
+            alignment: center;
+            Icon {
+                glyph: root.glyph;
+                size: 20px;
+                fill: Palette.ink-soft;
+            }
+        }
+        Text {
+            text: root.label;
+            vertical-alignment: center;
+            font-size: 14px;
+            font-weight: 600;
+            color: Palette.on-surface;
+        }
+    }
+}
+
 component TrackRow inherits Rectangle {
     out property <bool> hovering: ta.has-hover;
     in property <Entry> entry;
     in property <string> action-glyph;
     in property <bool> action-active;
+    in property <bool> can-queue;
+    in property <bool> can-move-up;
+    in property <bool> can-move-down;
+    in property <bool> can-drag;
+    // Called with how many places the row was dragged (negative: up) when it is let go.
+    callback dropped(int);
+    callback move-up();
+    callback move-down();
     callback clicked();
     callback action();
-    height: ta.pressed ? 70px : 64px;
-    animate height { duration: 300ms; easing: cubic-bezier(0.3, 1.3, 0.64, 1); }
+    callback queue-next();
+    // Pressing swells the highlight sideways only; the height never changes.
+    height: 64px;
+    // Pressing stretches the whole element sideways about its centre (the height never changes)
+    // and it springs back to the centre.
+    transform-scale-x: ta.pressed && !root.dragging ? min(1.0 + 12px / self.width, 1.05) : 1.0;
+    animate transform-scale-x { duration: 450ms; easing: cubic-bezier(0.3, 1.7, 0.5, 1); }
+    // The row being dragged is drawn above its neighbours.
+    z: root.dragging ? 10 : 0;
     border-radius: ta.pressed ? 24px : 14px;
     animate border-radius { duration: 260ms; easing: cubic-bezier(0.3, 1.3, 0.64, 1); }
-    background: ta.has-hover ? Palette.glass : #00000000;
-    animate background { duration: 120ms; }
     Rectangle {
         border-radius: root.border-radius;
-        background: ta.pressed ? Palette.state-layer : #00000000;
-        animate background { duration: 80ms; }
+        background: ta.has-hover ? Palette.glass : #00000000;
+        animate background { duration: 120ms; }
+        Rectangle {
+            border-radius: root.border-radius;
+            background: ta.pressed ? Palette.state-layer : #00000000;
+            animate background { duration: 80ms; }
+        }
     }
     Focusable {
         ring-radius: root.border-radius;
         activated => { root.clicked(); }
     }
+    property <length> menu-x;
+    property <length> menu-y;
+    property <bool> dragging;
+    property <bool> suppress-click;
+    property <length> press-y;
+    property <length> drag-dy;
+    property <int> menu-items: (root.can-queue ? 1 : 0) + (root.can-move-up ? 1 : 0) + (root.can-move-down ? 1 : 0);
     ta := TouchArea {
-        clicked => { root.clicked(); }
+        clicked => { if (!root.suppress-click) { root.clicked(); } }
+        moved => {
+            if (root.can-drag && self.pressed) {
+                if (abs(self.mouse-y - root.press-y) > 8px) { root.dragging = true; }
+                if (root.dragging) { root.drag-dy = self.mouse-y - root.press-y; }
+            }
+        }
+        pointer-event(event) => {
+            if (event.button == PointerEventButton.left && event.kind == PointerEventKind.down) {
+                root.suppress-click = false;
+                root.press-y = self.mouse-y;
+                root.drag-dy = 0px;
+            }
+            if (event.button == PointerEventButton.left && event.kind == PointerEventKind.up && root.dragging) {
+                root.suppress-click = true;
+                root.dragging = false;
+                root.dropped(Math.round(root.drag-dy / (root.height + 2px)));
+                root.drag-dy = 0px;
+            }
+            if (event.button == PointerEventButton.right && event.kind == PointerEventKind.down && root.menu-items > 0) {
+                root.menu-x = min(self.mouse-x, root.width - 196px);
+                root.menu-y = self.mouse-y;
+                menu.show();
+            }
+        }
     }
-    HorizontalLayout {
+    menu := PopupWindow {
+        x: root.menu-x;
+        y: root.menu-y;
+        width: 196px;
+        height: 16px + 40px * root.menu-items;
+        Rectangle {
+            background: Palette.glass-solid;
+            border-radius: 18px;
+            drop-shadow-blur: 20px;
+            drop-shadow-color: #00000080;
+            VerticalLayout {
+                padding: 8px;
+                if root.can-queue : MenuItem {
+                    glyph: Glyphs.play-next;
+                    label: "Play next";
+                    activated => { root.queue-next(); }
+                }
+                if root.can-move-up : MenuItem {
+                    glyph: Glyphs.up;
+                    label: "Move up";
+                    activated => { root.move-up(); }
+                }
+                if root.can-move-down : MenuItem {
+                    glyph: Glyphs.down;
+                    label: "Move down";
+                    activated => { root.move-down(); }
+                }
+            }
+        }
+    }
+    // What the row shows; while dragging it follows the pointer and is lifted off the list.
+    Rectangle {
+        y: root.drag-dy;
+        width: parent.width;
+        height: parent.height;
+        border-radius: root.border-radius;
+        background: root.dragging ? Palette.glass-solid : #00000000;
+        drop-shadow-blur: root.dragging ? 20px : 0px;
+        drop-shadow-color: #00000080;
+        HorizontalLayout {
         padding: 8px;
         spacing: 12px;
         Art {
@@ -699,6 +844,7 @@ component TrackRow inherits Rectangle {
             ink: root.action-active ? Palette.liked : Palette.ink-soft;
             clicked => { root.action(); }
         }
+        }
     }
 }
 
@@ -707,10 +853,17 @@ component SwitchRow inherits Rectangle {
     in property <string> description;
     in-out property <bool> on;
     callback toggled(bool);
-    height: sta.pressed ? 78px : 72px;
-    animate height { duration: 300ms; easing: cubic-bezier(0.3, 1.3, 0.64, 1); }
+    height: 72px;
+    // Pressing stretches the whole element sideways about its centre (the height never changes)
+    // and it springs back to the centre.
+    transform-scale-x: sta.pressed ? min(1.0 + 12px / self.width, 1.05) : 1.0;
+    animate transform-scale-x { duration: 450ms; easing: cubic-bezier(0.3, 1.7, 0.5, 1); }
     border-radius: 20px;
-    background: Palette.glass;
+    Rectangle {
+        border-radius: root.border-radius;
+        background: Palette.glass;
+        animate background { duration: 120ms; }
+    }
     HorizontalLayout {
         padding-left: 20px;
         padding-right: 20px;
@@ -892,6 +1045,8 @@ export component AppWindow inherits Window {
     callback shuffle-play();
     // Pointer on a song (kind: 0 pick, 1 more, 2 recent, 3 liked, 4 result, 5 up next, 6 library).
     callback warm-song(int, int);
+    callback queue-next(int, int);
+    callback move-up-next(int, int);
     callback like-up-next(int);
 
     // Settings
@@ -1383,6 +1538,8 @@ export component AppWindow inherits Window {
                         width: parent.width - 16px;
                         height: parent.height - 64px;
                         content-width: self.width;
+                        // Dragging a row must not scroll the list; the mouse wheel still does.
+                        interactive: false;
                         VerticalLayout {
                             width: parent.width;
                             alignment: start;
@@ -1390,6 +1547,14 @@ export component AppWindow inherits Window {
                             padding-bottom: 12px;
                             for entry[i] in root.up-next-rows : TrackRow {
                                 entry: entry;
+                                can-drag: true;
+                                dropped(places) => { root.move-up-next(i, max(0, min(i + places, root.up-next-rows.length - 1))); }
+                                can-queue: true;
+                                queue-next => { root.queue-next(5, i); }
+                                can-move-up: i > 0;
+                                can-move-down: i < root.up-next-rows.length - 1;
+                                move-up => { root.move-up-next(i, i - 1); }
+                                move-down => { root.move-up-next(i, i + 1); }
                                 clicked => { root.play-up-next(i); }
                                 changed hovering => { if (self.hovering) { root.warm-song(5, i); } }
                             }
@@ -1421,6 +1586,8 @@ export component AppWindow inherits Window {
                     padding-bottom: 12px;
                     for entry[i] in root.results : TrackRow {
                         entry: entry;
+                        can-queue: true;
+                        queue-next => { root.queue-next(4, i); }
                         action-glyph: entry.liked ? Glyphs.heart-filled : Glyphs.heart;
                         action-active: entry.liked;
                         changed hovering => { if (self.hovering) { root.warm-song(4, i); } }
@@ -1538,6 +1705,8 @@ export component AppWindow inherits Window {
                 }
                 for entry[i] in root.library-rows : TrackRow {
                     entry: entry;
+                    can-queue: true;
+                    queue-next => { root.queue-next(6, i); }
                     action-glyph: Glyphs.close;
                     clicked => { root.play-library(i); }
                     changed hovering => { if (self.hovering) { root.warm-song(6, i); } }
