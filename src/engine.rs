@@ -89,6 +89,9 @@ pub struct Engine {
     played_session: HashSet<TrackId>,
     /// When shuffle last asked for more songs (it waits a few seconds between tries).
     shuffle_fetched_at: Option<Instant>,
+    /// When the sleep timer pauses playback, and whether it stops after the current song instead.
+    sleep_deadline: Option<Instant>,
+    sleep_after_song: bool,
     /// The Shuffle play button was pressed and the first random songs are on their way.
     random_start_pending: bool,
     played_something: bool,
@@ -194,6 +197,8 @@ impl Engine {
             related_for: None,
             played_session: HashSet::new(),
             shuffle_fetched_at: None,
+            sleep_deadline: None,
+            sleep_after_song: false,
             random_start_pending: false,
             played_something: false,
             loading_since: None,
@@ -531,6 +536,43 @@ impl Engine {
         }
     }
 
+    /// Sets the sleep timer: minutes to wait, -1 for after the current song, 0 for off.
+    pub fn set_sleep_timer(&mut self, minutes: i32) {
+        self.sleep_deadline = None;
+        self.sleep_after_song = false;
+        match minutes {
+            minutes if minutes > 0 => {
+                self.sleep_deadline = Some(Instant::now() + Duration::from_secs(minutes as u64 * 60));
+                self.notify(format!("Sleep timer: playback pauses in {minutes} min"));
+            }
+            -1 => {
+                self.sleep_after_song = true;
+                // A song already lined up to follow gaplessly must not start.
+                if let Some(player) = self.mpv.as_mut() {
+                    player.clear_queued();
+                }
+                self.queued_next = None;
+                self.prefetch_tried = None;
+                self.notify("Sleep timer: playback stops after this song");
+            }
+            _ => self.notify("Sleep timer off"),
+        }
+    }
+
+    /// What the player bar shows next to the timer button; empty when no timer is set.
+    pub fn sleep_label(&self) -> String {
+        if self.sleep_after_song {
+            return "Song end".to_owned();
+        }
+        match self.sleep_deadline {
+            Some(deadline) => {
+                let minutes = deadline.saturating_duration_since(Instant::now()).as_secs().div_ceil(60);
+                format!("{minutes} min")
+            }
+            None => String::new(),
+        }
+    }
+
     pub fn seek_to(&mut self, seconds: f64) {
         let Some(player) = self.mpv.as_mut() else { return };
         match player.seek_to(seconds) {
@@ -860,6 +902,19 @@ impl Engine {
 
     /// Reads mpv's progress, notices the end of a track and moves on to the next one.
     pub fn tick(&mut self) {
+        if self.sleep_deadline.is_some_and(|deadline| Instant::now() >= deadline) {
+            self.sleep_deadline = None;
+            if self.state.playback == PlaybackStatus::Playing {
+                if let Some(player) = self.mpv.as_mut() {
+                    // Toggling pauses a playing song; if it was already paused, toggle back.
+                    if player.toggle_pause() == Ok(false) {
+                        let _ = player.toggle_pause();
+                    }
+                }
+                self.state.playback = PlaybackStatus::Paused;
+                self.notify("Sleep timer: paused");
+            }
+        }
         if self.state.playback != PlaybackStatus::Playing {
             self.last_poll = Instant::now();
             return;
@@ -913,7 +968,13 @@ impl Engine {
         }
         if self.played_something {
             self.played_something = false;
-            if self.state.adjacent_remote(true).is_some() {
+            if self.sleep_after_song {
+                self.sleep_after_song = false;
+                self.state.playback = PlaybackStatus::Stopped;
+                self.position = None;
+                self.duration = None;
+                self.notify("Sleep timer: stopped");
+            } else if self.state.adjacent_remote(true).is_some() {
                 self.skip(true);
             } else {
                 self.state.playback = PlaybackStatus::Stopped;
@@ -1008,7 +1069,7 @@ impl Engine {
     /// Keeps playback gapless: shortly before a track ends, looks up the next one and queues
     /// it in mpv, and notices when mpv has moved on to it by itself.
     fn handle_gapless(&mut self, position: Option<f64>, duration: Option<f64>) {
-        if self.stream_issued.is_none() {
+        if self.stream_issued.is_none() || self.sleep_after_song {
             return;
         }
         let next = self.state.adjacent_remote(true);

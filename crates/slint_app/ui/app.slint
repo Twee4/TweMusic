@@ -53,6 +53,7 @@ global Glyphs {
     out property <string> play-next: "M3 6h12v2H3zM3 11h12v2H3zM3 16h8v2H3zM17 11v8l6-4z";
     out property <string> up: "M7.41 15.41L12 10.83l4.59 4.58L18 14l-6-6-6 6z";
     out property <string> down: "M7.41 8.59L12 13.17l4.59-4.58L18 10l-6 6-6-6z";
+    out property <string> moon: "M12 3c-4.97 0-9 4.03-9 9s4.03 9 9 9 9-4.03 9-9c0-.46-.04-.92-.1-1.36-.98 1.37-2.58 2.26-4.4 2.26-2.98 0-5.4-2.42-5.4-5.4 0-1.81.89-3.42 2.26-4.4-.44-.06-.9-.1-1.36-.1z";
     out property <string> close: "M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z";
 }
 
@@ -1041,6 +1042,9 @@ export component AppWindow inherits Window {
     callback play-library(int);
     callback play-up-next(int);
     callback toggle-shuffle();
+    // Sleep timer: minutes to wait, -1 for after this song, 0 for off.
+    callback set-sleep(int);
+    in property <string> sleep-label;
     // Starts shuffled playback from songs like the ones the person plays.
     callback shuffle-play();
     // Pointer on a song (kind: 0 pick, 1 more, 2 recent, 3 liked, 4 result, 5 up next, 6 library).
@@ -1929,6 +1933,26 @@ export component AppWindow inherits Window {
                         clicked => { root.next(); }
                     }
                 }
+                VerticalLayout {
+                    alignment: center;
+                    RoundButton {
+                        glyph: Glyphs.moon;
+                        diameter: 40px;
+                        icon-size: 22px;
+                        fill: root.sleep-label != "" ? Palette.accent.with-alpha(0.35) : #00000000;
+                        ink: root.sleep-label != "" ? Palette.ink : Palette.ink-soft;
+                        clicked => { sleep-menu.show(); }
+                    }
+                }
+                if root.sleep-label != "" : VerticalLayout {
+                    alignment: center;
+                    Text {
+                        text: root.sleep-label;
+                        font-size: 12px;
+                        font-weight: 600;
+                        color: Palette.on-surface-variant;
+                    }
+                }
             }
             HorizontalLayout {
                 spacing: 10px;
@@ -1953,6 +1977,28 @@ export component AppWindow inherits Window {
                     vertical-alignment: center;
                     horizontal-alignment: right;
                     width: 40px;
+                }
+            }
+        }
+        // The sleep timer's choices, opening above the player bar.
+        sleep-menu := PopupWindow {
+            x: parent.width - 232px;
+            y: -(16px + 40px * 6) - 8px;
+            width: 200px;
+            height: 16px + 40px * 6;
+            Rectangle {
+                background: Palette.glass-solid;
+                border-radius: 18px;
+                drop-shadow-blur: 20px;
+                drop-shadow-color: #00000080;
+                VerticalLayout {
+                    padding: 8px;
+                    MenuItem { glyph: Glyphs.moon; label: "Off"; activated => { root.set-sleep(0); } }
+                    MenuItem { glyph: Glyphs.moon; label: "15 minutes"; activated => { root.set-sleep(15); } }
+                    MenuItem { glyph: Glyphs.moon; label: "30 minutes"; activated => { root.set-sleep(30); } }
+                    MenuItem { glyph: Glyphs.moon; label: "45 minutes"; activated => { root.set-sleep(45); } }
+                    MenuItem { glyph: Glyphs.moon; label: "60 minutes"; activated => { root.set-sleep(60); } }
+                    MenuItem { glyph: Glyphs.moon; label: "End of this song"; activated => { root.set-sleep(-1); } }
                 }
             }
         }

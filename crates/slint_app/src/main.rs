@@ -325,6 +325,7 @@ fn sync(window: &AppWindow, engine: &Engine, art: &mut Art, key: &mut ListKey, n
         _ => 0.0,
     });
     window.set_time_position(clock(engine.position));
+    window.set_sleep_label(engine.sleep_label().into());
     window.set_time_duration(clock(engine.duration));
     window.set_now_length(engine.duration.unwrap_or(0.0) as f32);
 }
@@ -463,6 +464,10 @@ fn main() -> Result<(), slint::PlatformError> {
     {
         let engine = Rc::clone(&engine);
         window.on_move_up_next(move |from, to| engine.borrow_mut().move_up_next(from.max(0) as usize, to.max(0) as usize));
+    }
+    {
+        let engine = Rc::clone(&engine);
+        window.on_set_sleep(move |minutes| engine.borrow_mut().set_sleep_timer(minutes));
     }
     {
         let engine = Rc::clone(&engine);
