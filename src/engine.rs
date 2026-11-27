@@ -907,7 +907,7 @@ impl Engine {
             if self.state.playback == PlaybackStatus::Playing {
                 if let Some(player) = self.mpv.as_mut() {
                     // Toggling pauses a playing song; if it was already paused, toggle back.
-                    if player.toggle_pause() == Ok(false) {
+                    if let Ok(false) = player.toggle_pause() {
                         let _ = player.toggle_pause();
                     }
                 }
