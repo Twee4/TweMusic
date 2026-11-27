@@ -1,23 +1,3 @@
-    // Pressing swells the highlight sideways only; the height never changes.
-    height: 64px;
-    // The row being dragged is drawn above its neighbours.
-    z: root.dragging ? 10 : 0;
-    border-radius: ta.pressed ? 24px : 14px;
-    animate border-radius { duration: 260ms; easing: cubic-bezier(0.3, 1.3, 0.64, 1); }
-    // At rest the highlight is a little narrower than the row; pressed, it fills it.
-    Rectangle {
-        x: ta.pressed ? 0px : 6px;
-        width: ta.pressed ? parent.width : parent.width - 12px;
-        animate x, width { duration: 300ms; easing: cubic-bezier(0.3, 1.3, 0.64, 1); }
-        border-radius: root.border-radius;
-        background: ta.has-hover ? Palette.glass : #00000000;
-        animate background { duration: 120ms; }
-        Rectangle {
-            border-radius: root.border-radius;
-            background: ta.pressed ? Palette.state-layer : #00000000;
-            animate background { duration: 80ms; }
-        }
-    }
 // TweMusic in Slint. The window only draws: all data and playback come from the Rust side
 // (twe_music::engine), which fills the properties below and handles the callbacks.
 
@@ -708,19 +688,25 @@ component TrackRow inherits Rectangle {
     callback clicked();
     callback action();
     callback queue-next();
-    // A row that can be dragged keeps its size so the rows around it do not move.
-    height: ta.pressed ? 70px : 64px;
-    animate height { duration: 300ms; easing: cubic-bezier(0.3, 1.3, 0.64, 1); }
+    // Pressing swells the highlight sideways only; the height never changes.
+    height: 64px;
     // The row being dragged is drawn above its neighbours.
     z: root.dragging ? 10 : 0;
     border-radius: ta.pressed ? 24px : 14px;
     animate border-radius { duration: 260ms; easing: cubic-bezier(0.3, 1.3, 0.64, 1); }
-    background: ta.has-hover ? Palette.glass : #00000000;
-    animate background { duration: 120ms; }
+    // At rest the highlight is a little narrower than the row; pressed, it fills it.
     Rectangle {
+        x: ta.pressed ? 0px : 6px;
+        width: ta.pressed ? parent.width : parent.width - 12px;
+        animate x, width { duration: 300ms; easing: cubic-bezier(0.3, 1.3, 0.64, 1); }
         border-radius: root.border-radius;
-        background: ta.pressed ? Palette.state-layer : #00000000;
-        animate background { duration: 80ms; }
+        background: ta.has-hover ? Palette.glass : #00000000;
+        animate background { duration: 120ms; }
+        Rectangle {
+            border-radius: root.border-radius;
+            background: ta.pressed ? Palette.state-layer : #00000000;
+            animate background { duration: 80ms; }
+        }
     }
     Focusable {
         ring-radius: root.border-radius;
