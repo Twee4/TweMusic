@@ -680,14 +680,20 @@ component TrackRow inherits Rectangle {
     in property <bool> can-queue;
     in property <bool> can-move-up;
     in property <bool> can-move-down;
+    in property <bool> can-drag;
+    // Called with how many places the row was dragged (negative: up) when it is let go.
+    callback dropped(int);
     callback move-up();
     callback move-down();
     callback clicked();
     callback action();
     callback queue-next();
-    height: ta.pressed ? 70px : 64px;
+    // A row that can be dragged keeps its size so the rows around it do not move.
+    height: ta.pressed && !root.can-drag ? 70px : 64px;
     animate height { duration: 300ms; easing: cubic-bezier(0.3, 1.3, 0.64, 1); }
-    border-radius: ta.pressed ? 24px : 14px;
+    // The row being dragged is drawn above its neighbours.
+    z: root.dragging ? 10 : 0;
+    border-radius: ta.pressed && !root.can-drag ? 24px : 14px;
     animate border-radius { duration: 260ms; easing: cubic-bezier(0.3, 1.3, 0.64, 1); }
     background: ta.has-hover ? Palette.glass : #00000000;
     animate background { duration: 120ms; }
@@ -702,10 +708,31 @@ component TrackRow inherits Rectangle {
     }
     property <length> menu-x;
     property <length> menu-y;
+    property <bool> dragging;
+    property <bool> suppress-click;
+    property <length> press-y;
+    property <length> drag-dy;
     property <int> menu-items: (root.can-queue ? 1 : 0) + (root.can-move-up ? 1 : 0) + (root.can-move-down ? 1 : 0);
     ta := TouchArea {
-        clicked => { root.clicked(); }
+        clicked => { if (!root.suppress-click) { root.clicked(); } }
+        moved => {
+            if (root.can-drag && self.pressed) {
+                if (abs(self.mouse-y - root.press-y) > 8px) { root.dragging = true; }
+                if (root.dragging) { root.drag-dy = self.mouse-y - root.press-y; }
+            }
+        }
         pointer-event(event) => {
+            if (event.button == PointerEventButton.left && event.kind == PointerEventKind.down) {
+                root.suppress-click = false;
+                root.press-y = self.mouse-y;
+                root.drag-dy = 0px;
+            }
+            if (event.button == PointerEventButton.left && event.kind == PointerEventKind.up && root.dragging) {
+                root.suppress-click = true;
+                root.dragging = false;
+                root.dropped(Math.round(root.drag-dy / (root.height + 2px)));
+                root.drag-dy = 0px;
+            }
             if (event.button == PointerEventButton.right && event.kind == PointerEventKind.down && root.menu-items > 0) {
                 root.menu-x = min(self.mouse-x, root.width - 196px);
                 root.menu-y = self.mouse-y;
@@ -743,7 +770,16 @@ component TrackRow inherits Rectangle {
             }
         }
     }
-    HorizontalLayout {
+    // What the row shows; while dragging it follows the pointer and is lifted off the list.
+    Rectangle {
+        y: root.drag-dy;
+        width: parent.width;
+        height: parent.height;
+        border-radius: root.border-radius;
+        background: root.dragging ? Palette.glass-solid : #00000000;
+        drop-shadow-blur: root.dragging ? 20px : 0px;
+        drop-shadow-color: #00000080;
+        HorizontalLayout {
         padding: 8px;
         spacing: 12px;
         Art {
@@ -782,6 +818,7 @@ component TrackRow inherits Rectangle {
             fill: #00000000;
             ink: root.action-active ? Palette.liked : Palette.ink-soft;
             clicked => { root.action(); }
+        }
         }
     }
 }
@@ -1469,6 +1506,8 @@ export component AppWindow inherits Window {
                         width: parent.width - 16px;
                         height: parent.height - 64px;
                         content-width: self.width;
+                        // Dragging a row must not scroll the list; the mouse wheel still does.
+                        interactive: false;
                         VerticalLayout {
                             width: parent.width;
                             alignment: start;
@@ -1476,6 +1515,8 @@ export component AppWindow inherits Window {
                             padding-bottom: 12px;
                             for entry[i] in root.up-next-rows : TrackRow {
                                 entry: entry;
+                                can-drag: true;
+                                dropped(places) => { root.move-up-next(i, max(0, min(i + places, root.up-next-rows.length - 1))); }
                                 can-queue: true;
                                 queue-next => { root.queue-next(5, i); }
                                 can-move-up: i > 0;
