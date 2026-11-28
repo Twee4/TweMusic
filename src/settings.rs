@@ -17,6 +17,10 @@ pub struct Settings {
     pub theme: String,
     /// Play the queue in random order.
     pub shuffle: bool,
+    /// Volume, 0 to 100 percent.
+    pub volume: u8,
+    /// Repeat: 0 off, 1 the whole queue, 2 the current song.
+    pub repeat: u8,
     /// Advanced, hand-edited only: when YouTube's bot check blocks the direct lookup, yt-dlp is
     /// used with no sign-in. Set this to a browser name from `ytdlp::BROWSERS` to have yt-dlp read
     /// that browser's signed-in session instead. Unset (or unknown) means no sign-in.
@@ -25,7 +29,7 @@ pub struct Settings {
 
 impl Default for Settings {
     fn default() -> Self {
-        Self { notifications: true, tray: false, dynamic_color: true, theme: "system".into(), shuffle: false, ytdlp_browser: None }
+        Self { notifications: true, tray: false, dynamic_color: true, theme: "system".into(), shuffle: false, volume: 100, repeat: 0, ytdlp_browser: None }
     }
 }
 
@@ -60,9 +64,9 @@ mod tests {
 
     #[test]
     fn defaults_and_partial_files() {
-        assert_eq!(Settings::default(), Settings { notifications: true, tray: false, dynamic_color: true, theme: "system".into(), shuffle: false, ytdlp_browser: None });
+        assert_eq!(Settings::default(), Settings { notifications: true, tray: false, dynamic_color: true, theme: "system".into(), shuffle: false, volume: 100, repeat: 0, ytdlp_browser: None });
         let partial: Settings = serde_json::from_str(r#"{ "tray": true }"#).unwrap();
-        assert_eq!(partial, Settings { notifications: true, tray: true, dynamic_color: true, theme: "system".into(), shuffle: false, ytdlp_browser: None });
+        assert_eq!(partial, Settings { notifications: true, tray: true, dynamic_color: true, theme: "system".into(), shuffle: false, volume: 100, repeat: 0, ytdlp_browser: None });
     }
 
     #[test]

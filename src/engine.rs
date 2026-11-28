@@ -92,6 +92,8 @@ pub struct Engine {
     /// When the sleep timer pauses playback, and whether it stops after the current song instead.
     sleep_deadline: Option<Instant>,
     sleep_after_song: bool,
+    /// Muted from the quick tools row (not remembered between runs).
+    pub muted: bool,
     /// The Shuffle play button was pressed and the first random songs are on their way.
     random_start_pending: bool,
     played_something: bool,
@@ -199,6 +201,7 @@ impl Engine {
             shuffle_fetched_at: None,
             sleep_deadline: None,
             sleep_after_song: false,
+            muted: false,
             random_start_pending: false,
             played_something: false,
             loading_since: None,
@@ -337,6 +340,51 @@ impl Engine {
         self.set_shuffle(on);
     }
 
+    pub fn volume(&self) -> u8 {
+        self.settings.volume
+    }
+
+    /// Sets the volume (0 to 100) and remembers it; moving the slider also lifts a mute.
+    pub fn set_volume(&mut self, percent: u8) {
+        let percent = percent.min(100);
+        self.update_settings(|settings| settings.volume = percent);
+        self.muted = false;
+        if let Some(player) = self.mpv.as_mut() {
+            let _ = player.set_volume(f64::from(percent));
+            let _ = player.set_mute(false);
+        }
+    }
+
+    pub fn toggle_mute(&mut self) {
+        self.muted = !self.muted;
+        if let Some(player) = self.mpv.as_mut() {
+            let _ = player.set_mute(self.muted);
+        }
+    }
+
+    pub fn repeat(&self) -> u8 {
+        self.settings.repeat
+    }
+
+    /// Off, then the whole queue, then the current song.
+    pub fn cycle_repeat(&mut self) {
+        let next = (self.settings.repeat + 1) % 3;
+        self.update_settings(|settings| settings.repeat = next);
+        // A song lined up to follow gaplessly would be the wrong one under repeat-one.
+        if next == 2 {
+            if let Some(player) = self.mpv.as_mut() {
+                player.clear_queued();
+            }
+            self.queued_next = None;
+            self.prefetch_tried = None;
+        }
+        self.notify(match next {
+            1 => "Repeat: the whole queue",
+            2 => "Repeat: this song",
+            _ => "Repeat off",
+        });
+    }
+
     pub fn is_playing(&self) -> bool {
         self.state.playback == PlaybackStatus::Playing
     }
@@ -353,7 +401,12 @@ impl Engine {
 
     fn ensure_player(&mut self) -> Result<&mut MpvPlayer, MpvError> {
         if self.mpv.is_none() {
-            self.mpv = Some(MpvPlayer::start()?);
+            let mut player = MpvPlayer::start()?;
+            let _ = player.set_volume(f64::from(self.settings.volume));
+            if self.muted {
+                let _ = player.set_mute(true);
+            }
+            self.mpv = Some(player);
         }
         Ok(self.mpv.as_mut().expect("player was just started"))
     }
@@ -499,6 +552,23 @@ impl Engine {
         }
         self.shuffle_fetched_at = Some(Instant::now());
         self.spawn_random();
+    }
+
+    /// Starts the first playable song of the queue; false when there is none.
+    fn play_first_remote(&mut self) -> bool {
+        let first = self
+            .state
+            .queue
+            .iter()
+            .find_map(|id| self.state.tracks.iter().find(|track| track.id == *id && track.video_id.is_some()))
+            .cloned();
+        match first {
+            Some(track) => {
+                self.play_remote(&track);
+                true
+            }
+            None => false,
+        }
     }
 
     pub fn skip(&mut self, forward: bool) {
@@ -974,8 +1044,14 @@ impl Engine {
                 self.position = None;
                 self.duration = None;
                 self.notify("Sleep timer: stopped");
+            } else if self.settings.repeat == 2 && self.state.current_track().is_some_and(|track| track.video_id.is_some()) {
+                if let Some(track) = self.state.current_track().cloned() {
+                    self.play_remote(&track);
+                }
             } else if self.state.adjacent_remote(true).is_some() {
                 self.skip(true);
+            } else if self.settings.repeat == 1 && self.play_first_remote() {
+                // Back to the start of the queue.
             } else {
                 self.state.playback = PlaybackStatus::Stopped;
                 self.position = None;
@@ -1069,7 +1145,7 @@ impl Engine {
     /// Keeps playback gapless: shortly before a track ends, looks up the next one and queues
     /// it in mpv, and notices when mpv has moved on to it by itself.
     fn handle_gapless(&mut self, position: Option<f64>, duration: Option<f64>) {
-        if self.stream_issued.is_none() || self.sleep_after_song {
+        if self.stream_issued.is_none() || self.sleep_after_song || self.settings.repeat == 2 {
             return;
         }
         let next = self.state.adjacent_remote(true);

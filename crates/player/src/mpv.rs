@@ -194,6 +194,17 @@ impl MpvPlayer {
         self.get_property("idle-active").ok().and_then(|value| value.as_bool()).unwrap_or(false)
     }
 
+    /// Sets the volume, 0 to 100 percent.
+    pub fn set_volume(&mut self, percent: f64) -> Result<(), MpvError> {
+        self.command(json!(["set_property", "volume", percent.clamp(0.0, 100.0)]))?;
+        Ok(())
+    }
+
+    pub fn set_mute(&mut self, muted: bool) -> Result<(), MpvError> {
+        self.command(json!(["set_property", "mute", muted]))?;
+        Ok(())
+    }
+
     /// Toggles pause and returns the new pause state.
     pub fn toggle_pause(&mut self) -> Result<bool, MpvError> {
         self.command(json!(["cycle", "pause"]))?;
