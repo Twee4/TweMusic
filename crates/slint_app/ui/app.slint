@@ -53,6 +53,14 @@ global Glyphs {
     out property <string> play-next: "M3 6h12v2H3zM3 11h12v2H3zM3 16h8v2H3zM17 11v8l6-4z";
     out property <string> up: "M7.41 15.41L12 10.83l4.59 4.58L18 14l-6-6-6 6z";
     out property <string> down: "M7.41 8.59L12 13.17l4.59-4.58L18 10l-6 6-6-6z";
+    out property <string> moon: "M12 3c-4.97 0-9 4.03-9 9s4.03 9 9 9 9-4.03 9-9c0-.46-.04-.92-.1-1.36-.98 1.37-2.58 2.26-4.4 2.26-2.98 0-5.4-2.42-5.4-5.4 0-1.81.89-3.42 2.26-4.4-.44-.06-.9-.1-1.36-.1z";
+    out property <string> shuffle: "M10.59 9.17L5.41 4 4 5.41l5.17 5.17 1.42-1.41zM14.5 4l2.04 2.04L4 18.59 5.41 20 17.96 7.46 20 9.5V4h-5.5zm.33 9.41l-1.41 1.41 3.13 3.13L14.5 20H20v-5.5l-2.04 2.04-3.13-3.13z";
+    out property <string> note: "M12 3v10.55c-.59-.34-1.27-.55-2-.55-2.21 0-4 1.79-4 4s1.79 4 4 4 4-1.79 4-4V7h4V3h-6z";
+    out property <string> pin: "M16 9V4h1c.55 0 1-.45 1-1s-.45-1-1-1H7c-.55 0-1 .45-1 1s.45 1 1 1h1v5c0 1.66-1.34 3-3 3v2h5.97v7l1 1 1-1v-7H19v-2c-1.66 0-3-1.34-3-3z";
+    out property <string> repeat: "M7 7h10v3l4-4-4-4v3H5v6h2V7zm10 10H7v-3l-4 4 4 4v-3h12v-6h-2v4z";
+    out property <string> repeat-one: "M7 7h10v3l4-4-4-4v3H5v6h2V7zm10 10H7v-3l-4 4 4 4v-3h12v-6h-2v4zm-4-2V9h-1l-2 1v1h1.5v4H13z";
+    out property <string> volume: "M3 9v6h4l5 5V4L7 9H3zm13.5 3c0-1.77-1.02-3.29-2.5-4.03v8.05c1.48-.73 2.5-2.25 2.5-4.02zM14 3.23v2.06c2.89.86 5 3.54 5 6.71s-2.11 5.85-5 6.71v2.06c4.01-.91 7-4.49 7-8.77s-2.99-7.86-7-8.77z";
+    out property <string> volume-off: "M16.5 12c0-1.77-1.02-3.29-2.5-4.03v2.21l2.45 2.45c.03-.2.05-.41.05-.63zm2.5 0c0 .94-.2 1.82-.54 2.64l1.51 1.51C20.63 14.91 21 13.5 21 12c0-4.28-2.99-7.86-7-8.77v2.06c2.89.86 5 3.54 5 6.71zM4.27 3L3 4.27 7.73 9H3v6h4l5 5v-6.73l4.25 4.25c-.67.52-1.42.93-2.25 1.18v2.06c1.38-.31 2.63-.95 3.69-1.81L19.73 21 21 19.73l-9-9L4.27 3zM12 4L9.91 6.09 12 8.18V4z";
     out property <string> close: "M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z";
 }
 
@@ -656,6 +664,47 @@ component Field inherits Rectangle {
     }
 }
 
+// A small horizontal slider (0 to 1); press or drag anywhere on it to set the value.
+component VolumeSlider inherits Rectangle {
+    in property <float> value;
+    out property <bool> hovered: sta.has-hover;
+    callback changed(float);
+    width: 84px;
+    height: 36px;
+    Rectangle {
+        y: (parent.height - 4px) / 2;
+        width: parent.width;
+        height: 4px;
+        border-radius: 2px;
+        background: Palette.ink-soft.with-alpha(0.3);
+        Rectangle {
+            width: parent.width * root.value;
+            height: parent.height;
+            border-radius: 2px;
+            background: Palette.accent;
+        }
+    }
+    Rectangle {
+        x: (root.width - 14px) * root.value;
+        y: (root.height - 14px) / 2;
+        width: sta.pressed ? 18px : 14px;
+        height: self.width;
+        border-radius: self.width / 2;
+        background: Palette.accent;
+        animate width { duration: 200ms; easing: cubic-bezier(0.3, 1.3, 0.64, 1); }
+    }
+    sta := TouchArea {
+        pointer-event(event) => {
+            if (event.button == PointerEventButton.left && event.kind == PointerEventKind.down) {
+                root.changed(max(0.0, min(self.mouse-x / root.width, 1.0)));
+            }
+        }
+        moved => {
+            if (self.pressed) { root.changed(max(0.0, min(self.mouse-x / root.width, 1.0))); }
+        }
+    }
+}
+
 // One entry of a right-click menu.
 component MenuItem inherits Rectangle {
     in property <string> glyph;
@@ -1041,6 +1090,23 @@ export component AppWindow inherits Window {
     callback play-library(int);
     callback play-up-next(int);
     callback toggle-shuffle();
+    // Sleep timer: minutes to wait, -1 for after this song, 0 for off.
+    callback set-sleep(int);
+    in property <string> sleep-label;
+    in property <float> volume: 1.0;
+    in property <bool> muted: false;
+    // Repeat: 0 off, 1 the whole queue, 2 this song.
+    in property <int> repeat: 0;
+    callback set-volume(float);
+    callback toggle-mute();
+    callback cycle-repeat();
+    // The quick tools row under the player bar: out of the way until the pointer is on the bottom
+    // edge or on the row, or pinned open.
+    in-out property <bool> tools-pinned: false;
+    property <bool> tools-open: root.tools-pinned || tools-strip.has-hover || tools-row-ta.has-hover
+        || t-sleep.hovered || t-shuffle.hovered || t-repeat.hovered || t-now.hovered || t-queue.hovered || t-volume.hovered || t-slider.hovered || t-pin.hovered;
+    property <length> tools-shift: root.tools-open ? 56px : 0px;
+    animate tools-shift { duration: 380ms; easing: cubic-bezier(0.3, 1.3, 0.64, 1); }
     // Starts shuffled playback from songs like the ones the person plays.
     callback shuffle-play();
     // Pointer on a song (kind: 0 pick, 1 more, 2 recent, 3 liked, 4 result, 5 up next, 6 library).
@@ -1817,16 +1883,34 @@ export component AppWindow inherits Window {
             }
         }
 
-        // Room for the player, which floats at the bottom: the page ends just above it.
-        Rectangle { height: 24px + 128px + 8px; }
+        // Room for the player, which floats at the bottom: the page ends just above it, and ends
+        // higher while the quick tools row lifts the player.
+        Rectangle { height: 24px + 128px + 8px + root.tools-shift; }
     }
 
     // Player: one glass card, the same width as the column.
+    // The bottom edge: the pointer here brings the quick tools row out.
+    tools-strip := TouchArea {
+        x: 32px + 80px + 24px;
+        width: parent.width - self.x - 32px;
+        y: parent.height - 24px;
+        height: 24px;
+    }
+    Rectangle {
+        x: tools-strip.x + (tools-strip.width - self.width) / 2;
+        y: parent.height - 14px;
+        width: 40px;
+        height: 4px;
+        border-radius: 2px;
+        background: Palette.ink-soft;
+        opacity: root.tools-open ? 0 : 0.45;
+        animate opacity { duration: 160ms; }
+    }
     player-bar := Rectangle {
         x: 32px + 80px + 24px;
         width: parent.width - self.x - 32px;
         height: 128px;
-        y: parent.height - 24px - self.height;
+        y: parent.height - 24px - self.height - root.tools-shift;
         border-radius: 28px;
         background: Palette.glass;
         // Tapping the artwork or title opens (and closes) the Now playing page.
@@ -2029,4 +2113,120 @@ export component AppWindow inherits Window {
         }
     }
     }
+
+    // Quick tools: shortcuts that stay hidden until needed.
+    tools-row := Rectangle {
+        width: 396px + (root.sleep-label != "" ? 74px : 0px);
+        animate width { duration: 300ms; easing: cubic-bezier(0.3, 1.3, 0.64, 1); }
+        height: 44px;
+        x: tools-strip.x + (tools-strip.width - self.width) / 2;
+        y: parent.height - 24px - self.height + (root.tools-open ? 0px : self.height + 28px);
+        animate y { duration: 380ms; easing: cubic-bezier(0.3, 1.3, 0.64, 1); }
+        border-radius: 22px;
+        background: Palette.glass-solid;
+        drop-shadow-blur: 16px;
+        drop-shadow-color: #00000060;
+        opacity: root.tools-open ? 1 : 0;
+        animate opacity { duration: 160ms; }
+        tools-row-ta := TouchArea { }
+        HorizontalLayout {
+            padding: 4px;
+            spacing: 4px;
+            alignment: center;
+            t-sleep := RoundButton {
+                glyph: Glyphs.moon;
+                diameter: 36px;
+                icon-size: 20px;
+                fill: root.sleep-label != "" ? Palette.accent : #00000000;
+                ink: root.sleep-label != "" ? Palette.on-accent : Palette.ink;
+                clicked => { root.tools-pinned = true; sleep-menu.show(); }
+            }
+            if root.sleep-label != "" : VerticalLayout {
+                alignment: center;
+                Text {
+                    text: root.sleep-label;
+                    font-size: 12px;
+                    font-weight: 600;
+                    color: Palette.on-surface-variant;
+                }
+            }
+            t-shuffle := RoundButton {
+                glyph: Glyphs.shuffle;
+                diameter: 36px;
+                icon-size: 20px;
+                fill: root.shuffle ? Palette.accent : #00000000;
+                ink: root.shuffle ? Palette.on-accent : Palette.ink;
+                clicked => { root.toggle-shuffle(); }
+            }
+            t-repeat := RoundButton {
+                glyph: root.repeat == 2 ? Glyphs.repeat-one : Glyphs.repeat;
+                diameter: 36px;
+                icon-size: 20px;
+                fill: root.repeat > 0 ? Palette.accent : #00000000;
+                ink: root.repeat > 0 ? Palette.on-accent : Palette.ink;
+                clicked => { root.cycle-repeat(); }
+            }
+            t-now := RoundButton {
+                glyph: Glyphs.note;
+                diameter: 36px;
+                icon-size: 20px;
+                fill: root.screen == 4 ? Palette.accent : #00000000;
+                ink: root.screen == 4 ? Palette.on-accent : Palette.ink;
+                clicked => { root.toggle-up-next(); }
+            }
+            t-queue := RoundButton {
+                glyph: Glyphs.play-next;
+                diameter: 36px;
+                icon-size: 20px;
+                fill: root.screen == 4 && root.up-next-open ? Palette.accent : #00000000;
+                ink: root.screen == 4 && root.up-next-open ? Palette.on-accent : Palette.ink;
+                clicked => {
+                    if (root.screen != 4) { root.toggle-up-next(); root.up-next-open = true; }
+                    else { root.up-next-open = !root.up-next-open; }
+                }
+            }
+            t-volume := RoundButton {
+                glyph: root.muted || root.volume == 0 ? Glyphs.volume-off : Glyphs.volume;
+                diameter: 36px;
+                icon-size: 20px;
+                fill: #00000000;
+                ink: root.muted ? Palette.ink-soft : Palette.ink;
+                clicked => { root.toggle-mute(); }
+            }
+            t-slider := VolumeSlider {
+                value: root.muted ? 0.0 : root.volume;
+                changed(fraction) => { root.set-volume(fraction); }
+            }
+            t-pin := RoundButton {
+                glyph: Glyphs.pin;
+                diameter: 36px;
+                icon-size: 18px;
+                fill: root.tools-pinned ? Palette.accent : #00000000;
+                ink: root.tools-pinned ? Palette.on-accent : Palette.ink-soft;
+                clicked => { root.tools-pinned = !root.tools-pinned; }
+            }
+        }
+        sleep-menu := PopupWindow {
+            x: parent.width - 212px;
+            y: -(16px + 40px * 6) - 72px;
+            width: 200px;
+            height: 16px + 40px * 6;
+            Rectangle {
+                background: Palette.glass-solid;
+                border-radius: 18px;
+                drop-shadow-blur: 20px;
+                drop-shadow-color: #00000080;
+                VerticalLayout {
+                    padding: 8px;
+                    MenuItem { glyph: Glyphs.moon; label: "Off"; activated => { root.set-sleep(0); } }
+                    MenuItem { glyph: Glyphs.moon; label: "15 minutes"; activated => { root.set-sleep(15); } }
+                    MenuItem { glyph: Glyphs.moon; label: "30 minutes"; activated => { root.set-sleep(30); } }
+                    MenuItem { glyph: Glyphs.moon; label: "45 minutes"; activated => { root.set-sleep(45); } }
+                    MenuItem { glyph: Glyphs.moon; label: "60 minutes"; activated => { root.set-sleep(60); } }
+                    MenuItem { glyph: Glyphs.moon; label: "End of this song"; activated => { root.set-sleep(-1); } }
+                }
+            }
+        }
+    }
+
 }

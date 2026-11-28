@@ -325,6 +325,10 @@ fn sync(window: &AppWindow, engine: &Engine, art: &mut Art, key: &mut ListKey, n
         _ => 0.0,
     });
     window.set_time_position(clock(engine.position));
+    window.set_sleep_label(engine.sleep_label().into());
+    window.set_volume(f32::from(engine.volume()) / 100.0);
+    window.set_muted(engine.muted);
+    window.set_repeat(i32::from(engine.repeat()));
     window.set_time_duration(clock(engine.duration));
     window.set_now_length(engine.duration.unwrap_or(0.0) as f32);
 }
@@ -463,6 +467,22 @@ fn main() -> Result<(), slint::PlatformError> {
     {
         let engine = Rc::clone(&engine);
         window.on_move_up_next(move |from, to| engine.borrow_mut().move_up_next(from.max(0) as usize, to.max(0) as usize));
+    }
+    {
+        let engine = Rc::clone(&engine);
+        window.on_set_sleep(move |minutes| engine.borrow_mut().set_sleep_timer(minutes));
+    }
+    {
+        let engine = Rc::clone(&engine);
+        window.on_set_volume(move |fraction| engine.borrow_mut().set_volume((fraction.clamp(0.0, 1.0) * 100.0).round() as u8));
+    }
+    {
+        let engine = Rc::clone(&engine);
+        window.on_toggle_mute(move || engine.borrow_mut().toggle_mute());
+    }
+    {
+        let engine = Rc::clone(&engine);
+        window.on_cycle_repeat(move || engine.borrow_mut().cycle_repeat());
     }
     {
         let engine = Rc::clone(&engine);
