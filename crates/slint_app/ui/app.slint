@@ -1527,6 +1527,45 @@ export component AppWindow inherits Window {
                         y: 8px;
                         clicked => { root.toggle-shuffle(); }
                     }
+                    // Sleep timer: pauses playback after a while or when the song ends.
+                    RoundButton {
+                        glyph: Glyphs.moon;
+                        diameter: 36px;
+                        icon-size: 20px;
+                        fill: root.sleep-label != "" ? Palette.accent : #00000000;
+                        ink: root.sleep-label != "" ? Palette.on-accent : Palette.ink;
+                        x: parent.width - 124px;
+                        y: 8px;
+                        clicked => { sleep-menu.show(); }
+                    }
+                    if root.sleep-label != "" : Text {
+                        x: 20px;
+                        y: 38px;
+                        text: "Sleep timer: " + root.sleep-label;
+                        font-size: 11px;
+                        color: Palette.on-surface-variant;
+                    }
+                    sleep-menu := PopupWindow {
+                        x: parent.width - 220px;
+                        y: 48px;
+                        width: 200px;
+                        height: 16px + 40px * 6;
+                        Rectangle {
+                            background: Palette.glass-solid;
+                            border-radius: 18px;
+                            drop-shadow-blur: 20px;
+                            drop-shadow-color: #00000080;
+                            VerticalLayout {
+                                padding: 8px;
+                                MenuItem { glyph: Glyphs.moon; label: "Off"; activated => { root.set-sleep(0); } }
+                                MenuItem { glyph: Glyphs.moon; label: "15 minutes"; activated => { root.set-sleep(15); } }
+                                MenuItem { glyph: Glyphs.moon; label: "30 minutes"; activated => { root.set-sleep(30); } }
+                                MenuItem { glyph: Glyphs.moon; label: "45 minutes"; activated => { root.set-sleep(45); } }
+                                MenuItem { glyph: Glyphs.moon; label: "60 minutes"; activated => { root.set-sleep(60); } }
+                                MenuItem { glyph: Glyphs.moon; label: "End of this song"; activated => { root.set-sleep(-1); } }
+                            }
+                        }
+                    }
                     RoundButton {
                         glyph: "M10 6L8.59 7.41 13.17 12l-4.58 4.59L10 18l6-6z";
                         diameter: 36px;
@@ -1933,26 +1972,6 @@ export component AppWindow inherits Window {
                         clicked => { root.next(); }
                     }
                 }
-                VerticalLayout {
-                    alignment: center;
-                    RoundButton {
-                        glyph: Glyphs.moon;
-                        diameter: 40px;
-                        icon-size: 22px;
-                        fill: root.sleep-label != "" ? Palette.accent.with-alpha(0.35) : #00000000;
-                        ink: root.sleep-label != "" ? Palette.ink : Palette.ink-soft;
-                        clicked => { sleep-menu.show(); }
-                    }
-                }
-                if root.sleep-label != "" : VerticalLayout {
-                    alignment: center;
-                    Text {
-                        text: root.sleep-label;
-                        font-size: 12px;
-                        font-weight: 600;
-                        color: Palette.on-surface-variant;
-                    }
-                }
             }
             HorizontalLayout {
                 spacing: 10px;
@@ -1977,28 +1996,6 @@ export component AppWindow inherits Window {
                     vertical-alignment: center;
                     horizontal-alignment: right;
                     width: 40px;
-                }
-            }
-        }
-        // The sleep timer's choices, opening above the player bar.
-        sleep-menu := PopupWindow {
-            x: parent.width - 232px;
-            y: -(16px + 40px * 6) - 8px;
-            width: 200px;
-            height: 16px + 40px * 6;
-            Rectangle {
-                background: Palette.glass-solid;
-                border-radius: 18px;
-                drop-shadow-blur: 20px;
-                drop-shadow-color: #00000080;
-                VerticalLayout {
-                    padding: 8px;
-                    MenuItem { glyph: Glyphs.moon; label: "Off"; activated => { root.set-sleep(0); } }
-                    MenuItem { glyph: Glyphs.moon; label: "15 minutes"; activated => { root.set-sleep(15); } }
-                    MenuItem { glyph: Glyphs.moon; label: "30 minutes"; activated => { root.set-sleep(30); } }
-                    MenuItem { glyph: Glyphs.moon; label: "45 minutes"; activated => { root.set-sleep(45); } }
-                    MenuItem { glyph: Glyphs.moon; label: "60 minutes"; activated => { root.set-sleep(60); } }
-                    MenuItem { glyph: Glyphs.moon; label: "End of this song"; activated => { root.set-sleep(-1); } }
                 }
             }
         }
