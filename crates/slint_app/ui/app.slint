@@ -1883,8 +1883,9 @@ export component AppWindow inherits Window {
             }
         }
 
-        // Room for the player, which floats at the bottom: the page ends just above it.
-        Rectangle { height: 24px + 128px + 8px; }
+        // Room for the player, which floats at the bottom: the page ends just above it, and ends
+        // higher while the quick tools row lifts the player.
+        Rectangle { height: 24px + 128px + 8px + root.tools-shift; }
     }
 
     // Player: one glass card, the same width as the column.
